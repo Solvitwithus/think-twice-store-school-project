@@ -1,11 +1,3 @@
-<?php
-// session_start();
-// if (!in_array('pos', $_SESSION['permissions'] ?? [])) {
-//     header('Location: /think-twice');
-//     exit;
-// }
-?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,6 +6,6 @@
     <title>Document</title>
 </head>
 <body>
-    <p>pos</p>
+    <p>Inventroy</p>
 </body>
 </html>

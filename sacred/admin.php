@@ -1,4 +1,10 @@
 <?php
+
+session_start();
+if (!in_array('roles', $_SESSION['permissions'] ?? [])) {
+    header('Location: /think-twice');
+    exit;
+}
 /*
  * ============================================================
  *  LESSON: How foreach works in PHP
