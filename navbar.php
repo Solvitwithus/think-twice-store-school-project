@@ -8,8 +8,19 @@
 </header>
 
 <script>
+    const path = window.location.pathname;
+
     document.querySelectorAll('.common-link').forEach(link => {
-        if (link.getAttribute('href') === window.location.pathname) {
+        const href = link.getAttribute('href');
+
+        // Inventory link: active on the main page OR anything inside /inventory/
+        if (href === '/think-twice/itemsandInventory.php') {
+            if (path === href || path.startsWith('/think-twice/inventory/')) {
+                link.classList.add('current');
+            }
+
+        // All other links: exact match only
+        } else if (path === href) {
             link.classList.add('current');
         }
     });

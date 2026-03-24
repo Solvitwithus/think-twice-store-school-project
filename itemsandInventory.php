@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inventory Dashboard</title>
+
     <link rel="stylesheet" href="/think-twice/styles.css">
     <style>
         body {
@@ -66,6 +67,7 @@
     <a href="/think-twice/inventory/priceSetting.php">Price Setting</a>
     <a href="/think-twice/inventory/viewSuppliers.php">View Suppliers</a>
     <a href="/think-twice/inventory/wareHousing.php">Warehousing</a>
+     <a href="/think-twice/inventory/unitofMeasure.php">Units of Measure</a>
 </div>
 
 </body>

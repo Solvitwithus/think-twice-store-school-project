@@ -344,8 +344,7 @@ try {
             cursor: pointer;
             font-size: 13px;
         }
-        .msg-error   { color: red;   margin: 10px auto; max-width: 800px; }
-        .msg-success { color: green; margin: 10px auto; max-width: 800px; }
+   
     </style>
 </head>
 <body>
