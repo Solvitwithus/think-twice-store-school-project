@@ -525,6 +525,7 @@ try {
        - A Delete form → POST with supplier ID → deletes and redirects
      ============================================================ -->
 <div>
+    <!-- TODO add rating panel -->
     <?php if (empty($suppliers)): ?>
         <p style="text-align:center; color:#999;">No suppliers yet. Create one above.</p>
     <?php else: ?>
