@@ -1,0 +1,36 @@
+/* Navbar styles */
+.navigation-header {
+    display: flex;
+    flex-direction: row;
+    background-color: #f5f5f5; /* light gray background */
+    padding: 10px;
+    align-items: center;
+}
+
+.common-link {
+    text-decoration: none;
+    margin-right: 15px;
+    color: #333; /* default link color */
+    font-weight: 500;
+    font-family: Arial, sans-serif;
+}
+
+.common-link:hover {
+    text-decoration: underline;
+    color: red;
+}
+
+.common-link:active {
+    text-decoration: underline;
+    color: green;
+    font-weight: bold;
+}
+.common-link.current {
+    color: #fff;
+    background-color: #2a7a2a;
+    font-weight: bold;
+    padding: 6px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    pointer-events: none; 
+}

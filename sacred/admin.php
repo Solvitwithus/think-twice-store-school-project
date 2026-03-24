@@ -195,6 +195,7 @@ $allPermissions = ['pos', 'inventory', 'suppliers', 'reports', 'roles'];
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Role Management</title>
+     <link rel="stylesheet" href="/think-twice/styles.css">
   <style>
     * { box-sizing: border-box; font-family: Arial, sans-serif; margin: 0; padding: 0; }
     body { background: #f4f6f9; padding: 30px; }
@@ -230,7 +231,7 @@ $allPermissions = ['pos', 'inventory', 'suppliers', 'reports', 'roles'];
   </style>
 </head>
 <body>
-
+<?php include 'navbar.php';?>
 <h1>⚙️ Role Management</h1>
 
 <?php
