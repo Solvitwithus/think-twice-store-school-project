@@ -64,8 +64,6 @@
     <a href="/think-twice/inventory/invoicing.php">Invoicing</a>
     <a href="/think-twice/inventory/orderEntry.php">Purchase Requisition Entry</a>
     <a href="/think-twice/inventory/orderEntryApproval.php">Purchase Requisition Approval</a>
-     <a href="/think-twice/inventory/orderEntryApproval.php">Quotation Against Purchase Requisition</a>
-   
     <a href="/think-twice/inventory/priceSetting.php">Price Setting</a>
     <a href="/think-twice/inventory/viewSuppliers.php">View Suppliers</a>
     <a href="/think-twice/inventory/wareHousing.php">Warehousing</a>
