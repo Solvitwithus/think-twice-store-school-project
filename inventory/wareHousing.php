@@ -1,88 +1,85 @@
-<?php 
+<?php
 require __DIR__ . '/../config/db.php';
 
-$error = '';
+$error   = '';
 $success = '';
 
 // ===================== HANDLE FORM =====================
-if($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])){
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
 
-    $item_id      = $_POST['itemSelectedId'] ?? null;
-    $quantity     = (int)($_POST['quantity'] ?? 0);
-    $movementType = $_POST['movementType'] ?? null;
+    $item_id      = $_POST['itemSelectedId']  ?? null;
+    $quantity     = (int)($_POST['quantity']   ?? 0);
+    $movementType = $_POST['movementType']     ?? null;
     $isIroned     = isset($_POST['isIroned'])  ? 1 : 0;
     $isSteamed    = isset($_POST['isSteamed']) ? 1 : 0;
     $isHanged     = isset($_POST['isHanged'])  ? 1 : 0;
+    $unitPrice    = (float)($_POST['unit_price'] ?? 0);
 
-    if(!$item_id || !$movementType || $quantity <= 0){
+    if (!$item_id || !$movementType || $quantity <= 0) {
         $error = "All fields are required and quantity must be greater than 0.";
     } else {
 
-        $allowed = ['IN','OUT','ADJUSTMENT'];
-        if(!in_array($movementType, $allowed)){
+        $allowed = ['IN', 'OUT', 'ADJUSTMENT'];
+        if (!in_array($movementType, $allowed)) {
             $error = "Invalid movement type.";
         } else {
 
-            try{
+            try {
                 $conn->beginTransaction();
 
-                // Validate item exists — grab barcode too
-                $stmt = $conn->prepare("SELECT id, barcode FROM items WHERE id = :id");
+                // ── Pull item_name + barcode from items table (just for lookup) ──
+                $stmt = $conn->prepare("SELECT item_name, barcode, selling_price FROM items WHERE id = :id AND status = 'active'");
                 $stmt->execute(['id' => $item_id]);
                 $itemRow = $stmt->fetch(PDO::FETCH_ASSOC);
-                if(!$itemRow){
-                    throw new Exception("Item not found.");
-                }
-                $barcode = $itemRow['barcode'];
 
-                // Get current stock
+                if (!$itemRow) {
+                    throw new Exception("Item not found or inactive.");
+                }
+
+                $itemName  = $itemRow['item_name'];
+                $barcode   = $itemRow['barcode'];
+                // Use submitted price if provided, otherwise fall back to selling_price
+                if ($unitPrice <= 0) $unitPrice = (float)$itemRow['selling_price'];
+
+                // ── Get current stock directly from stock_movements (no JOIN needed) ──
                 $stmt = $conn->prepare("
                     SELECT 
+                        id,
+                        quantity,
                         SUM(
-                            CASE 
+                            CASE
                                 WHEN movement_type = 'IN'  THEN quantity
                                 WHEN movement_type = 'OUT' THEN -quantity
                                 ELSE 0
                             END
-                        ) AS stock
-                    FROM stock_movements sm
-                    INNER JOIN items i ON i.id = sm.item_id
-                    WHERE i.barcode = :barcode
+                        ) AS net_stock
+                    FROM stock_movements
+                    WHERE barcode = :barcode
+                    LIMIT 1
                 ");
                 $stmt->execute(['barcode' => $barcode]);
-                $result     = $stmt->fetch(PDO::FETCH_ASSOC);
-                $currentQty = (int)($result['stock'] ?? 0);
+                $existing   = $stmt->fetch(PDO::FETCH_ASSOC);
+                $currentQty = (int)($existing['net_stock'] ?? 0);
 
-                // Handle ADJUSTMENT → resolve to IN or OUT before the upsert
-                if($movementType === "ADJUSTMENT"){
+                // ── Resolve ADJUSTMENT → IN or OUT ──
+                if ($movementType === "ADJUSTMENT") {
                     $diff = $quantity - $currentQty;
-                    if($diff === 0){
+                    if ($diff === 0) {
                         throw new Exception("Adjustment equals current stock — nothing to change.");
                     }
                     $movementType = $diff > 0 ? "IN" : "OUT";
                     $quantity     = abs($diff);
                 }
 
-                // Check for ANY existing row for this item (match on barcode only)
-                $check = $conn->prepare("
-                    SELECT sm.id, sm.quantity
-                    FROM stock_movements sm
-                    INNER JOIN items i ON i.id = sm.item_id
-                    WHERE i.barcode = :barcode
-                    LIMIT 1
-                ");
-                $check->execute(['barcode' => $barcode]);
-                $existing = $check->fetch(PDO::FETCH_ASSOC);
-
-                if($existing){
-                    // ✅ Row exists — adjust quantity based on movement direction
-                    $newQty = match($movementType){
+                if ($existing && $existing['id']) {
+                    // ── Row exists — update quantity ──
+                    $newQty = match ($movementType) {
                         'IN'  => $existing['quantity'] + $quantity,
                         'OUT' => $existing['quantity'] - $quantity,
-                        default => $quantity  // ADJUSTMENT already resolved to IN/OUT above
+                        default => $quantity
                     };
 
-                    if($newQty < 0){
+                    if ($newQty < 0) {
                         throw new Exception("Not enough stock. Current stock: {$existing['quantity']}.");
                     }
 
@@ -90,45 +87,51 @@ if($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])){
                         UPDATE stock_movements
                         SET quantity      = :qty,
                             movement_type = :type,
+                            unit_price    = :price,
                             is_ironed     = :ironed,
                             is_steamed    = :steamed,
                             is_hanged     = :hanged
                         WHERE id = :id
                     ");
                     $update->execute([
-                        'qty'    => $newQty,
-                        'type'   => $movementType,
-                        'ironed' => $isIroned,
-                        'steamed'=> $isSteamed,
-                        'hanged' => $isHanged,
-                        'id'     => $existing['id']
-                    ]);
-                    $success = "Stock updated — new quantity: {$newQty}.";
-                } else {
-                    // 🆕 First time this item appears — insert fresh row
-                    if($movementType === 'OUT'){
-                        throw new Exception("Cannot stock out — no existing record for this item.");
-                    }
-                    $insert = $conn->prepare("
-                        INSERT INTO stock_movements 
-                            (item_id, quantity, movement_type, is_ironed, is_steamed, is_hanged)
-                        VALUES 
-                            (:item_id, :qty, :type, :ironed, :steamed, :hanged)
-                    ");
-                    $insert->execute([
-                        'item_id' => $item_id,
-                        'qty'     => $quantity,
+                        'qty'     => $newQty,
                         'type'    => $movementType,
+                        'price'   => $unitPrice,
                         'ironed'  => $isIroned,
                         'steamed' => $isSteamed,
-                        'hanged'  => $isHanged
+                        'hanged'  => $isHanged,
+                        'id'      => $existing['id'],
                     ]);
+                    $success = "Stock updated — new quantity: {$newQty}.";
+
+                } else {
+                    // ── No existing row — insert fresh (item_name + barcode stored directly) ──
+                    if ($movementType === 'OUT') {
+                        throw new Exception("Cannot stock out — no existing record for this item.");
+                    }
+
+                    $insert = $conn->prepare("
+                        INSERT INTO stock_movements 
+                            (item_name, barcode, quantity, movement_type, unit_price, is_ironed, is_steamed, is_hanged)
+                        VALUES 
+                            (:item_name, :barcode, :qty, :type, :price, :ironed, :steamed, :hanged)
+                    ");
+                    $insert->execute([
+                        'item_name' => $itemName,
+                        'barcode'   => $barcode,
+                        'qty'       => $quantity,
+                        'type'      => $movementType,
+                        'price'     => $unitPrice,
+                        'ironed'    => $isIroned,
+                        'steamed'   => $isSteamed,
+                        'hanged'    => $isHanged,
+                    ]);
+                    $success = "Stock added successfully.";
                 }
 
                 $conn->commit();
-                if(empty($success)) $success = "Stock added successfully.";
 
-            } catch(Exception $e){
+            } catch (Exception $e) {
                 $conn->rollBack();
                 $error = $e->getMessage();
             }
@@ -136,39 +139,29 @@ if($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])){
     }
 }
 
-// ===================== FETCH ITEMS =====================
+// ===================== FETCH ITEMS (for dropdown only) =====================
 $items = [];
-try{
-    $query = $conn->prepare("SELECT id, item_name, barcode, sku_code, unit FROM items WHERE status = 'active' ORDER BY item_name");
+try {
+    $query = $conn->prepare("SELECT id, item_name, barcode, sku_code, unit, selling_price FROM items WHERE status = 'active' ORDER BY item_name");
     $query->execute();
     $items = $query->fetchAll(PDO::FETCH_ASSOC);
-} catch(PDOException $e){
+} catch (PDOException $e) {
     $error = "Error fetching items.";
 }
 
-// ===================== FETCH MOVEMENTS (with item info, no duplicates) =====================
+// ===================== FETCH MOVEMENTS (fully from stock_movements — no JOIN) =====================
 $movements = [];
-try{
+try {
     $stmt = $conn->prepare("
-        SELECT 
-            sm.id,
-            sm.quantity,
-            sm.movement_type,
-            sm.is_ironed,
-            sm.is_steamed,
-            sm.is_hanged,
-            sm.created_at,
-            i.item_name,
-            i.barcode,
-            i.sku_code
-        FROM stock_movements sm
-        INNER JOIN items i ON i.id = sm.item_id
-        ORDER BY sm.created_at DESC
+        SELECT id, item_name, barcode, quantity, unit_price, movement_type,
+               is_ironed, is_steamed, is_hanged, created_at
+        FROM stock_movements
+        ORDER BY created_at DESC
         LIMIT 100
     ");
     $stmt->execute();
     $movements = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch(PDOException $e){
+} catch (PDOException $e) {
     $error = "Error fetching movements.";
 }
 ?>
@@ -356,13 +349,49 @@ try{
         .cross-icon { color: #d1d5db; font-size: 1rem; }
 
         .barcode-text { font-family: monospace; font-size: 0.82rem; color: #777; }
-        .sku-text     { font-size: 0.8rem; color: #aaa; }
 
         .empty-state {
             text-align: center;
             padding: 40px 0;
             color: #aaa;
             font-size: 0.9rem;
+        }
+
+        /* ── Inline edit ── */
+        .btn-edit {
+            padding: 4px 12px;
+            font-size: 0.78rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #e0e7ff;
+            color: #4338ca;
+            font-weight: 600;
+            transition: background 0.15s;
+        }
+        .btn-edit:hover { background: #c7d2fe; }
+
+        .btn-delete {
+            padding: 4px 12px;
+            font-size: 0.78rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #fee2e2;
+            color: #b91c1c;
+            font-weight: 600;
+            transition: background 0.15s;
+            margin-left: 6px;
+        }
+        .btn-delete:hover { background: #fecaca; }
+
+        .inline-edit-input {
+            width: 70px;
+            padding: 4px 8px;
+            border: 1.5px solid #6366f1;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            text-align: center;
         }
     </style>
 </head>
@@ -373,27 +402,28 @@ try{
 <!-- ── FORM CARD ── -->
 <div class="card">
 
-    <?php if($error): ?>
+    <?php if ($error): ?>
         <div class="alert alert-error">⚠️ <?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
 
-    <?php if($success): ?>
+    <?php if ($success): ?>
         <div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div>
     <?php endif; ?>
 
     <form method="POST">
 
-        <!-- ITEM SELECT -->
+        <!-- ITEM SELECT (items table used only for lookup) -->
         <div class="form-group">
             <label for="itemSelectedId">Item</label>
             <select name="itemSelectedId" id="itemSelectedId" required onchange="showItemMeta(this)">
                 <option value="">— Select an item —</option>
-                <?php foreach($items as $item): ?>
-                    <option 
+                <?php foreach ($items as $item): ?>
+                    <option
                         value="<?= $item['id'] ?>"
                         data-barcode="<?= htmlspecialchars($item['barcode'] ?? '—') ?>"
                         data-sku="<?= htmlspecialchars($item['sku_code'] ?? '—') ?>"
                         data-unit="<?= htmlspecialchars($item['unit'] ?? '—') ?>"
+                        data-price="<?= number_format((float)$item['selling_price'], 2) ?>"
                         <?= (isset($_POST['itemSelectedId']) && $_POST['itemSelectedId'] == $item['id']) ? 'selected' : '' ?>
                     >
                         <?= htmlspecialchars($item['item_name']) ?>
@@ -401,23 +431,38 @@ try{
                 <?php endforeach; ?>
             </select>
             <div class="item-meta" id="itemMeta">
-                <span>📊 <strong>SKU:</strong> <span id="metaSku"></span></span>
                 <span>🔖 <strong>Barcode:</strong> <span id="metaBarcode"></span></span>
+                <span>📊 <strong>SKU:</strong> <span id="metaSku"></span></span>
                 <span>📐 <strong>Unit:</strong> <span id="metaUnit"></span></span>
+                <span>💰 <strong>Selling Price:</strong> <span id="metaPrice"></span></span>
             </div>
         </div>
 
         <!-- QUANTITY -->
         <div class="form-group">
             <label for="quantity">Quantity</label>
-            <input 
-                type="number" 
-                name="quantity" 
+            <input
+                type="number"
+                name="quantity"
                 id="quantity"
-                min="1" 
+                min="1"
                 placeholder="Enter quantity"
                 value="<?= htmlspecialchars($_POST['quantity'] ?? '') ?>"
                 required
+            >
+        </div>
+
+        <!-- UNIT PRICE -->
+        <div class="form-group">
+            <label for="unit_price">Unit Price (KES)</label>
+            <input
+                type="number"
+                name="unit_price"
+                id="unit_price"
+                min="0"
+                step="0.01"
+                placeholder="Auto-filled from selling price"
+                value="<?= htmlspecialchars($_POST['unit_price'] ?? '') ?>"
             >
         </div>
 
@@ -460,9 +505,9 @@ try{
 
 <!-- ── MOVEMENTS TABLE ── -->
 <div class="table-wrapper">
-    <h3>Recent Stock Movements</h3>
+    <h3>Current Inventory / Stock Movements</h3>
 
-    <?php if(empty($movements)): ?>
+    <?php if (empty($movements)): ?>
         <div class="empty-state">No stock movements recorded yet.</div>
     <?php else: ?>
     <table>
@@ -471,38 +516,52 @@ try{
                 <th>#</th>
                 <th>Item</th>
                 <th>Barcode</th>
-                <th>SKU</th>
                 <th>Qty</th>
+                <th>Unit Price</th>
                 <th>Type</th>
                 <th>Ironed</th>
                 <th>Steamed</th>
                 <th>Hanged</th>
                 <th>Date & Time</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
-            <?php foreach($movements as $i => $m): ?>
-            <tr>
+            <?php foreach ($movements as $i => $m): ?>
+            <tr id="row-<?= $m['id'] ?>">
                 <td><?= $i + 1 ?></td>
                 <td><strong><?= htmlspecialchars($m['item_name']) ?></strong></td>
                 <td class="barcode-text"><?= htmlspecialchars($m['barcode'] ?? '—') ?></td>
-                <td class="sku-text"><?= htmlspecialchars($m['sku_code'] ?? '—') ?></td>
-                <td><strong><?= number_format($m['quantity']) ?></strong></td>
-                <td>
-                    <?php 
-                        $type = $m['movement_type'];
-                        $badgeClass = match($type) {
-                            'IN'  => 'badge-in',
-                            'OUT' => 'badge-out',
+
+                <!-- Quantity — switches to input on Edit -->
+                <td id="qty-<?= $m['id'] ?>"><strong><?= number_format($m['quantity']) ?></strong></td>
+
+                <!-- Unit Price — switches to input on Edit -->
+                <td id="price-<?= $m['id'] ?>">KES <?= number_format((float)($m['unit_price'] ?? 0), 2) ?></td>
+
+                <!-- Type badge -->
+                <td id="type-<?= $m['id'] ?>">
+                    <?php
+                        $type      = $m['movement_type'];
+                        $badgeClass = match ($type) {
+                            'IN'    => 'badge-in',
+                            'OUT'   => 'badge-out',
                             default => 'badge-adj'
                         };
                     ?>
                     <span class="badge <?= $badgeClass ?>"><?= htmlspecialchars($type) ?></span>
                 </td>
+
                 <td><?= $m['is_ironed']  ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
                 <td><?= $m['is_steamed'] ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
                 <td><?= $m['is_hanged']  ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
                 <td><?= htmlspecialchars(date('d M Y, H:i', strtotime($m['created_at']))) ?></td>
+
+                <!-- Actions -->
+                <td id="actions-<?= $m['id'] ?>">
+                    <button class="btn-edit"   onclick="startEdit(<?= $m['id'] ?>, <?= $m['quantity'] ?>, '<?= $m['movement_type'] ?>', <?= (float)($m['unit_price'] ?? 0) ?>)">✏️ Edit</button>
+                    <button class="btn-delete" onclick="deleteRow(<?= $m['id'] ?>)">🗑️ Delete</button>
+                </td>
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -511,26 +570,127 @@ try{
 </div>
 
 <script>
-    // Show barcode/SKU/unit below the item dropdown when selected
+    // ── Dropdown meta display ──
     function showItemMeta(select) {
-        const opt    = select.options[select.selectedIndex];
-        const meta   = document.getElementById('itemMeta');
+        const opt     = select.options[select.selectedIndex];
+        const meta    = document.getElementById('itemMeta');
         const barcode = opt.dataset.barcode;
-
         if (!barcode) { meta.style.display = 'none'; return; }
-
-        document.getElementById('metaSku').textContent     = opt.dataset.sku     || '—';
         document.getElementById('metaBarcode').textContent = opt.dataset.barcode || '—';
+        document.getElementById('metaSku').textContent     = opt.dataset.sku     || '—';
         document.getElementById('metaUnit').textContent    = opt.dataset.unit    || '—';
+        document.getElementById('metaPrice').textContent   = 'KES ' + (opt.dataset.price || '0.00');
+        // Pre-fill the price input with selling_price
+        document.getElementById('unit_price').value = opt.dataset.price || '';
         meta.style.display = 'block';
     }
 
-    // Restore meta on page reload after POST
     window.addEventListener('DOMContentLoaded', () => {
         const sel = document.getElementById('itemSelectedId');
         if (sel && sel.value) showItemMeta(sel);
     });
+
+    // ── Inline edit ──
+    function startEdit(id, currentQty, currentType, currentPrice) {
+        const qtyCell     = document.getElementById(`qty-${id}`);
+        const priceCell   = document.getElementById(`price-${id}`);
+        const typeCell    = document.getElementById(`type-${id}`);
+        const actionsCell = document.getElementById(`actions-${id}`);
+
+        qtyCell.innerHTML = `<input class="inline-edit-input" id="edit-qty-${id}" type="number" min="0" value="${currentQty}">`;
+
+        priceCell.innerHTML = `<input class="inline-edit-input" id="edit-price-${id}" type="number" min="0" step="0.01" style="width:90px" value="${currentPrice}">`;
+
+        typeCell.innerHTML = `
+            <select id="edit-type-${id}" style="padding:4px 8px;border-radius:6px;border:1.5px solid #6366f1;font-size:0.85rem;">
+                <option value="IN"  ${currentType==='IN'  ? 'selected':''}>IN</option>
+                <option value="OUT" ${currentType==='OUT' ? 'selected':''}>OUT</option>
+            </select>`;
+
+        actionsCell.innerHTML = `
+            <button class="btn-edit"   onclick="saveEdit(${id})">💾 Save</button>
+            <button class="btn-delete" onclick="location.reload()">✖ Cancel</button>`;
+    }
+
+    function saveEdit(id) {
+        const qty   = document.getElementById(`edit-qty-${id}`).value;
+        const price = document.getElementById(`edit-price-${id}`).value;
+        const type  = document.getElementById(`edit-type-${id}`).value;
+
+        fetch('', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `inline-edit=1&row_id=${id}&quantity=${qty}&unit_price=${price}&movementType=${type}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        });
+    }
+
+    function deleteRow(id) {
+        if (!confirm('Delete this stock record?')) return;
+        fetch('', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `inline-delete=1&row_id=${id}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById(`row-${id}`).remove();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        });
+    }
 </script>
 
+<?php
+// ── Handle inline AJAX edits / deletes (must be before any HTML output in production,
+//    but works here because fetch() doesn't parse HTML — just the JSON response) ──
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    // Inline edit
+    if (isset($_POST['inline-edit'])) {
+        header('Content-Type: application/json');
+        $row_id = (int)$_POST['row_id'];
+        $qty    = (int)$_POST['quantity'];
+        $price  = (float)($_POST['unit_price'] ?? 0);
+        $type   = $_POST['movementType'];
+
+        if ($qty < 0 || !in_array($type, ['IN', 'OUT'])) {
+            echo json_encode(['success' => false, 'message' => 'Invalid data.']);
+            exit;
+        }
+        try {
+            $stmt = $conn->prepare("UPDATE stock_movements SET quantity = :qty, unit_price = :price, movement_type = :type WHERE id = :id");
+            $stmt->execute(['qty' => $qty, 'price' => $price, 'type' => $type, 'id' => $row_id]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // Inline delete
+    if (isset($_POST['inline-delete'])) {
+        header('Content-Type: application/json');
+        $row_id = (int)$_POST['row_id'];
+        try {
+            $stmt = $conn->prepare("DELETE FROM stock_movements WHERE id = :id");
+            $stmt->execute(['id' => $row_id]);
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit;
+    }
+}
+?>
 </body>
 </html>
