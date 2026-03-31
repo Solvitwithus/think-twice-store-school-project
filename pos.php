@@ -45,6 +45,32 @@ $error = "failed to resolve barcode" . $e->getMessage();
      $_SESSION['cart'] = [];
   }
 
+//   hold cart
+
+if(isset($_POST['hold-cart'])){
+    $cartName = $_POST['hold'];
+
+    if(!isset($_SESSION['held-carts'])){
+        $_SESSION['held-carts'] = [];
+    }
+
+    $_SESSION['held-carts'][$cartName] = $_SESSION['cart'];
+
+    // clear current cart after holding
+    $_SESSION['cart'] = [];
+}
+// restore the cart items
+
+if(isset($_POST['resume-cart'])){
+    $name = $_POST['cart-name'];
+
+    if(isset($_SESSION['held-carts'][$name])){
+        $_SESSION['cart'] = $_SESSION['held-carts'][$name];
+
+        // optional: remove from held carts after restoring
+        unset($_SESSION['held-carts'][$name]);
+    }
+}
 // if $remainingAmount if 0 then insert sale make a post and close the session ['cart']
 }
 ?>
@@ -164,7 +190,8 @@ $remainingAmount = $grandTotal - $postedCash;
 </div>
 
 <div style="background:red; width:fit-content; height:fit-content; cursor:pointer; background:red;">
-    <h6>VIEW INVENTORY</h6>
+    
+    <a href="/think-twice/inventory/wareHousing.php">VIEW INVENTORY</a>
 </div>
 <form method="POST">
     <button type="submit" name="clear-cart" style="background:red; cursor:pointer;">
@@ -205,7 +232,7 @@ $remainingAmount = $grandTotal - $postedCash;
         justify-content: center;" id="hold">
 <form method="POST">
     <input type="text" name="hold">
-    <button type="submit" name="hold">Hold</button>
+    <button type="submit" name="hold-cart">Hold</button>
 
 </form>
 <button type="button" onclick="closeModal('hold')">close</button>
@@ -214,18 +241,37 @@ $remainingAmount = $grandTotal - $postedCash;
 
 
 
-      <!-- held carts -->
+  <div style=" display: none;
+    position: fixed; inset: 0;
+    background: rgba(26,26,46,0.45);
+    backdrop-filter: blur(3px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;" id="held">
 
-      <div style=" display: none;
-        position: fixed; inset: 0;
-        background: rgba(26,26,46,0.45);
-        backdrop-filter: blur(3px);
-        z-index: 100;
-        align-items: center;
-        justify-content: center;" id="held">
-<p>held carts</p>
+<?php if(!empty($_SESSION['held-carts'])): ?>
+
+    <?php foreach($_SESSION['held-carts'] as $cartName => $heldCart): ?>
+        <div style="background:white; padding:10px; margin:10px;">
+
+            <h4><?= htmlspecialchars($cartName) ?></h4>
+            <p>Items: <?= count($heldCart) ?></p>
+
+            <!-- Resume cart -->
+            <form method="POST">
+                <input type="hidden" name="cart-name" value="<?= htmlspecialchars($cartName) ?>">
+                <button type="submit" name="resume-cart">Resume</button>
+            </form>
+
+        </div>
+    <?php endforeach; ?>
+
+<?php else: ?>
+    <p>No held carts</p>
+<?php endif; ?>
+
 <button type="button" onclick="closeModal('held')">close</button>
-      </div>
+</div>
 <script>
     
     function opencartmodal(){
