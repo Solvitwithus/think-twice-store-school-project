@@ -167,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 
-<form method="POST" action="login.php" class="login_container" id="loginForm">
+<form method="POST" class="login_container" id="loginForm">
   <h2>Login</h2>
 
   <?php if ($error): ?>

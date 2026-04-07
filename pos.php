@@ -148,7 +148,7 @@ foreach ($_SESSION['cart'] as $ci) {
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:         #0f1117;
+    --bg:         #c0c0c0;
     --surface:    #181c27;
     --surface2:   #1f2535;
     --border:     #2a3145;
