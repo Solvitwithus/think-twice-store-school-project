@@ -12,7 +12,7 @@
 </head>
 <body>
  <?php include 'navbar.php'; ?>
-    <p>this is the fucking dashboard</p>
+    <p>this is the dashboard</p>
    
 </body>
 </html>

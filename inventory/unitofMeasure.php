@@ -39,7 +39,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update_unit'])) {
 }
 
 // ── LOAD ROW INTO FORM FOR EDITING ───────────────────────
-// Triggered by clicking the Edit link: ?edit_id=X
 if ($_SERVER["REQUEST_METHOD"] === "GET" && isset($_GET['edit_id'])) {
     $edit_id = (int) $_GET['edit_id'];
     try {
@@ -48,7 +47,7 @@ if ($_SERVER["REQUEST_METHOD"] === "GET" && isset($_GET['edit_id'])) {
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($row) {
-            $editing   = true;           // switches form to edit mode
+            $editing   = true;
             $edit_name = $row['measure_name'];
             $edit_abbr = $row['abbreviation'];
         }
@@ -76,7 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['creating_new_measure'
 // ── FEEDBACK ─────────────────────────────────────────────
 if (isset($_GET['success']))  $success = "Unit created successfully!";
 if (isset($_GET['updated']))  $success = "Unit updated successfully!";
-if (isset($_GET['deleted']))  $success = "Unit deleted.";
+if (isset($_GET['deleted']))  $success = "Unit deleted successfully!";
 
 // ── FETCH ALL ────────────────────────────────────────────
 $measures = [];
@@ -94,73 +93,216 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/think-twice/styles.css">
     <title>Units of Measure</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+
+        .msg-success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 12px 15px;
+            border-radius: 6px;
+            border: 1px solid #c3e6cb;
+            margin-bottom: 20px;
+        }
+
+        .msg-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 12px 15px;
+            border-radius: 6px;
+            border: 1px solid #f5c6cb;
+            margin-bottom: 20px;
+        }
+
+        /* Form Styling */
+        form {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+            margin-bottom: 40px;
+        }
+
+        label {
+            display: block;
+            margin: 15px 0 5px;
+            font-weight: 600;
+            color: #444;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .cancel-link {
+            color: #777;
+            text-decoration: none;
+            margin-left: 15px;
+            font-size: 16px;
+        }
+
+        .cancel-link:hover {
+            color: #555;
+            text-decoration: underline;
+        }
+
+        /* Table Styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            max-width: 800px;
+        }
+
+        th {
+            background-color: #2c3e50;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+
+        .actions a {
+            color: #3498db;
+            text-decoration: none;
+            margin-right: 12px;
+        }
+
+        .actions a:hover {
+            text-decoration: underline;
+        }
+
+        .delete-btn {
+            background-color: #e74c3c;
+            color: white;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .delete-btn:hover {
+            background-color: #c0392b;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            form, table {
+                max-width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
-<?php include __DIR__ . '/../navbar.php'; ?>
 
-<?php if ($success): ?><p class="msg-success"><?= htmlspecialchars($success) ?></p><?php endif; ?>
-<?php if ($error):   ?><p class="msg-error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
+    <?php include __DIR__ . '/../navbar.php'; ?>
 
-<!--
-    FORM — two modes:
-    Create: empty fields, submits to creating_new_measure
-    Edit:   pre-filled fields, hidden id, submits to update_unit
--->
-<form style="display:flex; flex-direction:column; width:60%;" method="POST">
+    <h1>Units of Measure</h1>
 
-    <?php if ($editing): ?>
-        <!-- Carries the ID to the update handler -->
-        <input type="hidden" name="edit_unit_id" value="<?= $edit_id ?>">
+    <?php if ($success): ?>
+        <p class="msg-success"><?= htmlspecialchars($success) ?></p>
     <?php endif; ?>
 
-    <label for="unitAbbreviation">Unit Abbreviation</label>
-    <input type="text" name="unitAbbreviation" id="unitAbbreviation"
-           value="<?= htmlspecialchars($edit_abbr) ?>">
-
-    <label for="descriptiveName">Descriptive Name</label>
-    <input type="text" name="descriptiveName" id="descriptiveName"
-           value="<?= htmlspecialchars($edit_name) ?>">
-
-    <?php if ($editing): ?>
-        <button type="submit" name="update_unit">Save Changes</button>
-        <a href="<?= $_SERVER['PHP_SELF'] ?>">Cancel</a>
-    <?php else: ?>
-        <button type="submit" name="creating_new_measure">Add Unit</button>
+    <?php if ($error): ?>
+        <p class="msg-error"><?= htmlspecialchars($error) ?></p>
     <?php endif; ?>
 
-</form>
+    <!-- Form -->
+    <form method="POST">
+        <?php if ($editing): ?>
+            <input type="hidden" name="edit_unit_id" value="<?= $edit_id ?>">
+        <?php endif; ?>
 
-<table>
-    <thead>
-        <tr>
-            <th>Unit Name</th>
-            <th>Abbreviation</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php foreach ($measures as $measure): ?>
-        <tr>
-            <td><?= htmlspecialchars($measure['measure_name']) ?></td>
-            <td><?= htmlspecialchars($measure['abbreviation']) ?></td>
-            <td>
-                <!-- Edit: GET link loads this row into the form above -->
-                <a href="<?= $_SERVER['PHP_SELF'] ?>?edit_id=<?= (int) $measure['id'] ?>">Edit</a>
+        <label for="unitAbbreviation">Unit Abbreviation</label>
+        <input type="text" name="unitAbbreviation" id="unitAbbreviation"
+               value="<?= htmlspecialchars($edit_abbr) ?>" required>
 
-                <!-- Delete: POST form with just the ID -->
-                <form method="POST" style="display:inline;">
-                    <input type="hidden" name="delete_unit_id" value="<?= (int) $measure['id'] ?>">
-                    <button type="submit" name="delete_unit"
-                            onclick="return confirm('Delete <?= htmlspecialchars(addslashes($measure['measure_name'])) ?>?')">
-                        Delete
-                    </button>
-                </form>
-            </td>
-        </tr>
-        <?php endforeach; ?>
-    </tbody>
-</table>
+        <label for="descriptiveName">Descriptive Name (e.g. Kilogram)</label>
+        <input type="text" name="descriptiveName" id="descriptiveName"
+               value="<?= htmlspecialchars($edit_name) ?>" required>
+
+        <?php if ($editing): ?>
+            <button type="submit" name="update_unit">Save Changes</button>
+            <a href="<?= $_SERVER['PHP_SELF'] ?>" class="cancel-link">Cancel</a>
+        <?php else: ?>
+            <button type="submit" name="creating_new_measure">Add New Unit</button>
+        <?php endif; ?>
+    </form>
+
+    <!-- Table -->
+    <h2>All Units (<?= count($measures) ?>)</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Unit Name</th>
+                <th>Abbreviation</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($measures as $measure): ?>
+            <tr>
+                <td><?= htmlspecialchars($measure['measure_name']) ?></td>
+                <td><strong><?= htmlspecialchars($measure['abbreviation']) ?></strong></td>
+                <td class="actions">
+                    <a href="<?= $_SERVER['PHP_SELF'] ?>?edit_id=<?= (int) $measure['id'] ?>">Edit</a>
+                    
+                    <form method="POST" style="display:inline;" 
+                          onsubmit="return confirm('Delete <?= htmlspecialchars(addslashes($measure['measure_name'])) ?>?')">
+                        <input type="hidden" name="delete_unit_id" value="<?= (int) $measure['id'] ?>">
+                        <button type="submit" name="delete_unit" class="delete-btn">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+
 </body>
 </html>
