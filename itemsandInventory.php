@@ -60,8 +60,6 @@
     <a href="/think-twice/inventory/createCategory.php">Create Category</a>
     <a href="/think-twice/inventory/createItem.php">Create Item</a>
     <a href="/think-twice/inventory/cycleManagement.php">Cycle Management</a>
-    <!-- <a href="/think-twice/inventory/goodsReceiveNote.php">Goods Receive Note</a> -->
-    <a href="/think-twice/inventory/invoicing.php">Invoicing</a>
     <a href="/think-twice/inventory/orderEntry.php">Purchase Requisition Entry</a>
     <a href="/think-twice/inventory/orderEntryApproval.php">Purchase Requisition Approval</a>
     <a href="/think-twice/inventory/priceSetting.php">Price Setting</a>
