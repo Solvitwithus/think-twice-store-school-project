@@ -12,9 +12,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = strtolower(trim($_POST['username'] ?? ''));
     $password = $_POST['password'] ?? '';
 
-    if (!$username || !$password) {
+  if (!$username || !$password) {
         $error = 'Both fields are required.';
-    } else {
+    }
+    elseif (strlen($username) < 3) {
+        $error = 'Username cannot have less than 3 characters.';
+    }
+    elseif (strlen($password) < 8) {
+        $error = 'Password cannot be less than 8 characters.';
+    }
+    elseif (!preg_match('/[!@#$%^&*()_+\-=\[\]{};:"\\\\|,.<>\/?]/', $password)) {
+        $error = 'Password must contain at least one special character.';
+    }
+    else {
         try {
             // ── 1. Fetch the user row ────────────────────────────────────
             // We bring in role_id so we can do the role lookup next.
