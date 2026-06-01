@@ -569,7 +569,9 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 
 <!-- ══════ TOP BAR (unchanged) ══════ -->
 <div class="topbar">
-  <div class="topbar-brand">&#9632; POS Terminal</div>
+  <div class="topbar-brand"     onclick="window.location.href='/think-twice/dashboard.php'"
+    style="cursor:pointer;"
+>&#9632; POS Terminal</div>
   <div class="topbar-meta">
     Cashier: <span>Admin</span> &nbsp;|&nbsp;
     Date: <span><?= date('d M Y') ?></span> &nbsp;|&nbsp;
