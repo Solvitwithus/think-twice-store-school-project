@@ -1,72 +1,78 @@
+<?php
+session_start();
+require __DIR__ . '/config/authGuard.php';
+requireLogin();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inventory Dashboard</title>
-
-    <link rel="stylesheet" href="/think-twice/styles.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f5f5f5;
-            margin: 0;
-            padding: 0;
-        }
-
-        h1 {
-            text-align: center;
-            margin-top: 20px;
-            color: #333;
-        }
-
-        .inventory-links {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 15px;
-            margin: 30px auto;
-            max-width: 900px;
-        }
-
-        .inventory-links a {
-            display: block;
-            padding: 15px 25px;
-            background-color: #4CAF50;
-            color: white;
-            text-decoration: none;
-            font-weight: bold;
-            border-radius: 6px;
-            transition: background-color 0.3s, transform 0.2s;
-        }
-
-        .inventory-links a:hover {
-            background-color: #45a049;
-            transform: scale(1.05);
-        }
-
-        .inventory-links a:active {
-            background-color: #3e8e41;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inventory Management - Think Twice</title>
+  <link rel="stylesheet" href="/think-twice/public/theme.css">
 </head>
-<body>
+<body class="page-container">
 
-<?php include 'navbar.php'; ?>
+  <?php include 'navbar.php'; ?>
 
-<h1>Inventory Management</h1>
+  <div class="page-header">
+    <h1 class="page-title">Inventory Management</h1>
+    <p class="page-subtitle">Organize your stock, items, and suppliers</p>
+  </div>
 
-<div class="inventory-links">
-    <a href="/think-twice/inventory/createCategory.php">Create Category</a>
-    <a href="/think-twice/inventory/createItem.php">Create Item</a>
-    <a href="/think-twice/inventory/cycleManagement.php">Cycle Management</a>
-    <a href="/think-twice/inventory/orderEntry.php">Purchase Requisition Entry</a>
-    <a href="/think-twice/inventory/orderEntryApproval.php">Purchase Requisition Approval</a>
-    <a href="/think-twice/inventory/priceSetting.php">Price Setting</a>
-    <a href="/think-twice/suppliers.php">View Suppliers</a>
-    <a href="/think-twice/inventory/wareHousing.php">Warehousing</a>
-     <a href="/think-twice/inventory/unitofMeasure.php">Units of Measure</a>
-</div>
+  <div class="page-content">
+
+    <div class="grid grid-2 gap-lg">
+
+      <!-- ITEM MANAGEMENT SECTION -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Item Management</div>
+        </div>
+        <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+          <a href="/think-twice/inventory/createItem.php" class="btn btn-primary btn-block">Create New Item</a>
+          <a href="/think-twice/inventory/viewSuppliers.php" class="btn btn-secondary btn-block">View Items</a>
+          <a href="/think-twice/inventory/unitofMeasure.php" class="btn btn-secondary btn-block">Units of Measure</a>
+        </div>
+      </div>
+
+      <!-- CATEGORY MANAGEMENT SECTION -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Category Management</div>
+        </div>
+        <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+          <a href="/think-twice/inventory/createCategory.php" class="btn btn-primary btn-block">Create Category</a>
+          <a href="/think-twice/inventory/priceSetting.php" class="btn btn-secondary btn-block">Price Setting</a>
+        </div>
+      </div>
+
+      <!-- STOCK MANAGEMENT SECTION -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Stock Management</div>
+        </div>
+        <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+          <a href="/think-twice/inventory/goodsReceiveNote.php" class="btn btn-primary btn-block">Goods Receive Note</a>
+          <a href="/think-twice/inventory/wareHousing.php" class="btn btn-secondary btn-block">Warehousing</a>
+          <a href="/think-twice/inventory/cycleManagement.php" class="btn btn-secondary btn-block">Cycle Management</a>
+        </div>
+      </div>
+
+      <!-- PURCHASE ORDER SECTION -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Purchase Orders</div>
+        </div>
+        <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+          <a href="/think-twice/inventory/orderEntry.php" class="btn btn-primary btn-block">Create Requisition</a>
+          <a href="/think-twice/inventory/orderEntryApproval.php" class="btn btn-secondary btn-block">Approve Requisition</a>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
 
 </body>
 </html>

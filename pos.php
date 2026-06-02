@@ -2,62 +2,45 @@
 session_start();
 require __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/mpesa_token.php';
-// ─────────────────────────────────────────────────────────────────────────────
-// mpesa_token.php already handles token caching in session and exposes
-// $accessToken — no changes needed there.
-// ─────────────────────────────────────────────────────────────────────────────
-
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  AJAX BLOCK — ?action=... requests from JavaScript
-//  Must sit at the very top, BEFORE any HTML, to avoid "headers already sent".
 // ═════════════════════════════════════════════════════════════════════════════
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
 
     // ── 1. stk_push ──────────────────────────────────────────────────────────
-    // JS calls this when user clicks "Send STK Push".
-    // We build the signed request and fire it at Safaricom's sandbox endpoint.
-    // Safaricom then sends a payment prompt directly to the customer's phone.
     if ($_GET['action'] === 'stk_push') {
 
         $body   = json_decode(file_get_contents('php://input'), true);
         $phone  = preg_replace('/\s+/', '', $body['phone'] ?? '');
-        $amount = (int) ceil((float)($body['amount'] ?? 0)); // M-Pesa only accepts whole-number amounts
+        $amount = (int) ceil((float)($body['amount'] ?? 0));
 
-        // ── Phone normalisation ───────────────────────────────────────────
-        // Safaricom expects 2547XXXXXXXX — 12 digits, no + or leading 0.
-        $phone = ltrim($phone, '+');                                    // drop leading +
-        if (str_starts_with($phone, '0')) {                            // 07XX → 2547XX
+        $phone = ltrim($phone, '+');
+        if (str_starts_with($phone, '0')) {
             $phone = '254' . substr($phone, 1);
         }
 
-        $shortcode = getenv('SHORTCODE');   // 174379 in sandbox
-        $passkey   = getenv('PASSKEY');     // long string from Daraja portal
-        $timestamp = date('YmdHis');        // YYYYMMDDHHmmss — must be fresh every call
-
-        // ── Password = Base64(Shortcode + Passkey + Timestamp) ────────────
-        // This is NOT your login password. It's a per-request signature that
-        // Safaricom uses to verify the request came from you.
-        $password = base64_encode($shortcode . $passkey . $timestamp);
+        $shortcode = "174379";
+        $passkey   = "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
+        $timestamp = date('YmdHis');
+        $password  = base64_encode($shortcode . $passkey . $timestamp);
 
         $payload = [
             'BusinessShortCode' => $shortcode,
             'Password'          => $password,
-            'Timestamp'         => $timestamp,    // ← must match the one used in $password
-            // CustomerPayBillOnline  → Paybill number
-            // CustomerBuyGoodsOnline → Till/Buy Goods number
+            'Timestamp'         => $timestamp,
             'TransactionType'   => 'CustomerPayBillOnline',
             'Amount'            => $amount,
-            'PartyA'            => $phone,        // customer's number (receives the prompt)
-            'PartyB'            => $shortcode,    // your shortcode (receives the money)
-            'PhoneNumber'       => $phone,        // same as PartyA for STK
-            // ⚠ CALLBACK URL must be a live HTTPS URL.
-            // For local dev: run `ngrok http 80` and paste the https URL here.
-            // Safaricom will POST the result to this URL after the transaction.
+            'PartyA'            => $phone,
+            'PartyB'            => $shortcode,
+            'PhoneNumber'       => $phone,
             'CallBackURL'       => 'https://think-twice.wuaze.com/mpesa-callback.php',
-            'AccountReference'  => 'POS-Sale',
-            'TransactionDesc'   => 'POS Payment',
+            // ── AccountReference appears as the account label in the STK prompt.
+            // The BUSINESS NAME shown at the top of the prompt is set in Daraja portal
+            // under your Paybill/Till registration — not here in code.
+            'AccountReference'  => 'Think Twice',
+            'TransactionDesc'   => 'POS Sale – Think Twice',
         ];
 
         $ch = curl_init('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest');
@@ -66,7 +49,6 @@ if (isset($_GET['action'])) {
             CURLOPT_POSTFIELDS     => json_encode($payload),
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER     => [
-                // $accessToken comes from mpesa_token.php (session-cached Bearer token)
                 'Authorization: Bearer ' . $accessToken,
                 'Content-Type: application/json',
             ],
@@ -76,10 +58,10 @@ if (isset($_GET['action'])) {
 
         $json = json_decode($result, true);
 
-        // Save CheckoutRequestID so stk_query can look it up
         if (!empty($json['CheckoutRequestID'])) {
             $_SESSION['stk_checkout_id'] = $json['CheckoutRequestID'];
             $_SESSION['stk_amount']      = $amount;
+            $_SESSION['stk_phone']       = $phone;
         }
 
         echo json_encode($json);
@@ -87,13 +69,6 @@ if (isset($_GET['action'])) {
     }
 
     // ── 2. stk_query ─────────────────────────────────────────────────────────
-    // JS polls this every ~5 s after an STK push to check if the customer paid.
-    // ResultCode 0      = success
-    // ResultCode 1032   = customer cancelled
-    // ResultCode 1037   = timeout (no response from customer)
-    // "in progress" text = still waiting
-    // ⚠ Sandbox note: the query endpoint can be flaky — in production, always
-    //   treat the CallbackURL response as the authoritative confirmation.
     if ($_GET['action'] === 'stk_query') {
 
         $checkoutId = $_SESSION['stk_checkout_id'] ?? '';
@@ -127,28 +102,24 @@ if (isset($_GET['action'])) {
         $result = curl_exec($ch);
         curl_close($ch);
 
-        echo $result;   // forward Safaricom's JSON straight to JS
+        echo $result;
         exit;
     }
 
     // ── 3. finalize_sale ─────────────────────────────────────────────────────
-    // Called by JS once payment is confirmed (M-Pesa or split).
-    // Saves receipt to session, clears cart, then JS redirects to ?show_receipt=1.
     if ($_GET['action'] === 'finalize_sale') {
 
         $body      = json_decode(file_get_contents('php://input'), true);
-        $method    = $body['method']    ?? 'mpesa';   // 'mpesa' | 'split'
+        $method    = $body['method']    ?? 'mpesa';
         $cashPaid  = (float)($body['cash_paid']  ?? 0);
         $mpesaPaid = (float)($body['mpesa_paid'] ?? 0);
 
-        // Recompute total from session (never trust totals from JS)
         $total = 0;
         foreach ($_SESSION['cart'] as $ci) {
             $total += $ci['quantity'] * $ci['price'];
         }
         $change = max(0, $cashPaid - ($total - $mpesaPaid));
 
-        // Store receipt so the PHP page can render it after redirect
         $_SESSION['last_receipt'] = [
             'receipt_no' => 'RCT-' . strtoupper(substr(uniqid(), -6)),
             'date'       => date('d M Y H:i'),
@@ -161,26 +132,88 @@ if (isset($_GET['action'])) {
             'change'     => $change,
         ];
 
-        // ── TODO: persist to database ─────────────────────────────────────
-        // try {
-        //     $conn->beginTransaction();
-        //     $s = $conn->prepare("INSERT INTO sales (total,method,cashier,created_at) VALUES (?,?,?,NOW())");
-        //     $s->execute([$total, $method, 'Admin']);
-        //     $saleId = $conn->lastInsertId();
-        //     foreach ($_SESSION['cart'] as $item) {
-        //         $s2 = $conn->prepare("INSERT INTO sale_items (sale_id,barcode,qty,unit_price) VALUES (?,?,?,?)");
-        //         $s2->execute([$saleId, $item['barcode'], $item['quantity'], $item['price']]);
-        //     }
-        //     $conn->commit();
-        // } catch (PDOException $e) {
-        //     $conn->rollBack();
-        //     echo json_encode(['error' => $e->getMessage()]); exit;
-        // }
-
-        unset($_SESSION['stk_checkout_id'], $_SESSION['stk_amount']);
+        unset($_SESSION['stk_checkout_id'], $_SESSION['stk_amount'], $_SESSION['stk_phone']);
         $_SESSION['cart'] = [];
 
         echo json_encode(['success' => true]);
+        exit;
+    }
+
+    // ── 4. get_transactions ───────────────────────────────────────────────────
+    // Returns today's successful M-Pesa callbacks so cashier can manually pick one.
+    if ($_GET['action'] === 'get_transactions') {
+        try {
+            $stmt = $conn->prepare(
+                "SELECT id, mpesa_receipt, phone, amount, transaction_date, matched, created_at
+                 FROM mpesa_transactions
+                 WHERE DATE(created_at) = CURDATE() AND result_code = 0
+                 ORDER BY created_at DESC
+                 LIMIT 30"
+            );
+            $stmt->execute();
+            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        } catch (PDOException $e) {
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // ── 5. manual_confirm ────────────────────────────────────────────────────
+    // Cashier selects a confirmed callback transaction to close the sale manually.
+    // This is the fallback when the STK query spinner never resolves (sandbox flakiness).
+    if ($_GET['action'] === 'manual_confirm') {
+        $body      = json_decode(file_get_contents('php://input'), true);
+        $txId      = (int)($body['transaction_id'] ?? 0);
+        $mode      = $body['method']    ?? 'mpesa';
+        $cashPaid  = (float)($body['cash_paid']  ?? 0);
+
+        if (!$txId) {
+            echo json_encode(['error' => 'No transaction selected']);
+            exit;
+        }
+
+        try {
+            $tx = $conn->prepare(
+                "SELECT * FROM mpesa_transactions WHERE id = ? AND result_code = 0"
+            );
+            $tx->execute([$txId]);
+            $txRow = $tx->fetch(PDO::FETCH_ASSOC);
+
+            if (!$txRow) {
+                echo json_encode(['error' => 'Transaction not found or was not successful']);
+                exit;
+            }
+
+            $mpesaPaid = (float)$txRow['amount'];
+            $total = 0;
+            foreach ($_SESSION['cart'] as $ci) {
+                $total += $ci['quantity'] * $ci['price'];
+            }
+            $change = max(0, $cashPaid - ($total - $mpesaPaid));
+
+            $_SESSION['last_receipt'] = [
+                'receipt_no'    => 'RCT-' . strtoupper(substr(uniqid(), -6)),
+                'date'          => date('d M Y H:i'),
+                'cashier'       => 'Admin',
+                'items'         => $_SESSION['cart'],
+                'total'         => $total,
+                'method'        => $mode,
+                'cash_paid'     => $cashPaid,
+                'mpesa_paid'    => $mpesaPaid,
+                'change'        => $change,
+                'mpesa_receipt' => $txRow['mpesa_receipt'],
+            ];
+
+            // Mark transaction as matched so it can't be reused
+            $conn->prepare("UPDATE mpesa_transactions SET matched = 1 WHERE id = ?")->execute([$txId]);
+
+            unset($_SESSION['stk_checkout_id'], $_SESSION['stk_amount'], $_SESSION['stk_phone']);
+            $_SESSION['cart'] = [];
+
+            echo json_encode(['success' => true]);
+        } catch (PDOException $e) {
+            echo json_encode(['error' => $e->getMessage()]);
+        }
         exit;
     }
 
@@ -199,16 +232,11 @@ $change          = 0;
 $cashReceived    = 0;
 $paymentComplete = false;
 
-// Bootstrap session keys
 if (!isset($_SESSION['cart']))        $_SESSION['cart']        = [];
 if (!isset($_SESSION['held-carts']))  $_SESSION['held-carts']  = [];
 
-/* ─────────────────────────────────────────────────────────────────────────
-   POST HANDLERS  (unchanged from original except #7 cash — now saves receipt)
-   ───────────────────────────────────────────────────────────────────────── */
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    // 1. Look up item by barcode and add / increment in cart
     if (isset($_POST['find-item'])) {
         $code = trim($_POST['code'] ?? '');
         try {
@@ -239,7 +267,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // 2. Update quantities
     if (isset($_POST['update-cart']) && !empty($_POST['quantities'])) {
         foreach ($_POST['quantities'] as $index => $qty) {
             $qty = (int) $qty;
@@ -255,7 +282,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $success = "Cart updated.";
     }
 
-    // 3. Remove single item
     if (isset($_POST['remove-item'])) {
         $idx = (int) $_POST['item-index'];
         if (isset($_SESSION['cart'][$idx])) {
@@ -264,13 +290,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // 4. Clear entire cart
     if (isset($_POST['clear-cart'])) {
         $_SESSION['cart'] = [];
         $success = "Cart cleared.";
     }
 
-    // 5. Hold cart
     if (isset($_POST['hold-cart'])) {
         $cartName = trim($_POST['hold'] ?? '');
         if ($cartName === '') {
@@ -284,7 +308,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // 6. Resume held cart
     if (isset($_POST['resume-cart'])) {
         $name = $_POST['cart-name'] ?? '';
         if (isset($_SESSION['held-carts'][$name])) {
@@ -296,7 +319,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
     }
 
-    // 7. CASH PAYMENT — [CHANGED] now also builds receipt and redirects
     if (isset($_POST['check-balance'])) {
         $freshTotal = 0;
         foreach ($_SESSION['cart'] as $ci) {
@@ -308,8 +330,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $change          = $cashReceived - $freshTotal;
             $paymentComplete = true;
 
-            // ── Save receipt to session ──────────────────────────────────
-            // After redirect, ?show_receipt=1 will auto-open the receipt modal.
             $_SESSION['last_receipt'] = [
                 'receipt_no' => 'RCT-' . strtoupper(substr(uniqid(), -6)),
                 'date'       => date('d M Y H:i'),
@@ -322,10 +342,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 'change'     => $change,
             ];
 
-            // TODO: save to DB here (same structure as finalize_sale above)
-
             $_SESSION['cart'] = [];
-            // Redirect so the receipt modal opens on a clean page
             header('Location: pos.php?show_receipt=1');
             exit;
         } else {
@@ -335,15 +352,12 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-// ── Grand total for display ──────────────────────────────────────────────────
 foreach ($_SESSION['cart'] as $ci) {
     $grandTotal += $ci['quantity'] * $ci['price'];
 }
 
-// ── Pull receipt from session (set by any payment path) ─────────────────────
 $receipt     = $_SESSION['last_receipt'] ?? null;
 $showReceipt = isset($_GET['show_receipt']) && $receipt;
-// Clear receipt from session once we've read it so it doesn't reappear on refresh
 if ($showReceipt) unset($_SESSION['last_receipt']);
 ?>
 <!DOCTYPE html>
@@ -351,10 +365,10 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>POS Terminal</title>
+<title>POS Terminal - Think Twice</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/think-twice/public/pos-styles.css">
 <style>
-  /* ── unchanged base variables ── */
   :root {
     --bg:         #393838;
     --surface:    #181c27;
@@ -364,7 +378,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     --accent-dim: #00a370;
     --danger:     #ff4d6a;
     --warn:       #ffb830;
-    --mpesa:      #4caf50;   /* [NEW] green for M-Pesa branding */
+    --mpesa:      #4caf50;
     --text:       #e8ecf5;
     --muted:      #6b7594;
     --mono:       'IBM Plex Mono', monospace;
@@ -409,7 +423,6 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .btn-danger    { background: var(--danger);   color: #fff; }
   .btn-warn      { background: var(--warn);     color: #0f1117; }
   .btn-ghost     { background: transparent;     color: var(--muted); border: 1px solid var(--border); }
-  /* [NEW] M-Pesa green button */
   .btn-mpesa     { background: var(--mpesa);    color: #fff; }
   .btn:hover { opacity: .85; }
   .btn-sm { padding: 6px 12px; font-size: 12px; }
@@ -452,7 +465,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .total-currency { font-size: 14px; color: var(--muted); margin-right: 3px; }
 
   /* ── RIGHT PANEL ── */
-  .pos-right { width: 220px; display: flex; flex-direction: column; background: var(--surface); flex-shrink: 0; }
+  .pos-right { width: 220px; display: flex; flex-direction: column; background: var(--surface); flex-shrink: 0; overflow-y: auto; }
   .panel-title { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: 16px 18px 10px; }
 
   .action-btn { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border: none; background: transparent; color: var(--text); font-family: var(--sans); font-size: 13px; font-weight: 500; cursor: pointer; border-bottom: 1px solid var(--border); transition: background .12s; width: 100%; text-align: left; text-decoration: none; }
@@ -461,8 +474,9 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .dot-green  { background: var(--accent); }
   .dot-yellow { background: var(--warn); }
   .dot-blue   { background: #5b8ef0; }
-  .dot-mpesa  { background: var(--mpesa); }   /* [NEW] */
-  .dot-split  { background: #a78bfa; }        /* [NEW] */
+  .dot-mpesa  { background: var(--mpesa); }
+  .dot-split  { background: #a78bfa; }
+  .dot-orange { background: var(--warn); }
 
   .action-btn.full-pay { background: var(--accent); color: #0f1117; font-weight: 700; font-size: 14px; margin: 12px; width: calc(100% - 24px); border-radius: 8px; justify-content: center; border: none; padding: 14px; }
   .action-btn.full-pay:hover { background: var(--accent-dim); }
@@ -502,9 +516,9 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .held-card-info strong { display: block; font-size: 14px; margin-bottom: 3px; }
   .held-card-info span { font-size: 11px; color: var(--muted); font-family: var(--mono); }
 
-  /* [NEW] ── STK STATUS INDICATOR ─────────────────────────────────────── */
+  /* ── STK STATUS INDICATOR ── */
   .stk-status {
-    display: none;            /* shown by JS when STK push fires */
+    display: none;
     padding: 14px;
     border-radius: 8px;
     font-size: 13px;
@@ -521,11 +535,11 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .spin { display: inline-block; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* [NEW] ── SPLIT AMOUNT DISPLAY ────────────────────────────────────── */
+  /* ── SPLIT AMOUNT DISPLAY ── */
   .split-remainder { font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--mpesa); text-align: center; padding: 8px 0 16px; }
   .split-hint { font-size: 11px; color: var(--muted); text-align: center; margin-top: -12px; margin-bottom: 16px; }
 
-  /* [NEW] ── RECEIPT MODAL ───────────────────────────────────────────── */
+  /* ── RECEIPT MODAL ── */
   #receipt-modal .modal { width: 400px; }
   .receipt-body { background: #fff; color: #111; border-radius: 8px; padding: 20px; font-family: var(--mono); font-size: 12px; line-height: 1.6; }
   .receipt-header { text-align: center; border-bottom: 1px dashed #ccc; padding-bottom: 12px; margin-bottom: 12px; }
@@ -545,8 +559,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .badge-mpesa { background: #e8f5e9; color: #1b5e20; }
   .badge-split { background: #fff3e0; color: #e65100; }
 
-  /* [NEW] ── PRINT STYLES ─────────────────────────────────────────────
-     When window.print() is called, hide everything except the receipt.    */
+  /* ── PRINT STYLES ── */
   @media print {
     body > *:not(#print-area) { display: none !important; }
     #print-area {
@@ -561,17 +574,34 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     }
     #print-area .receipt-body { box-shadow: none; }
   }
-  /* Hidden on screen, shown only during print */
   #print-area { display: none; }
+
+  /* ── TRANSACTION CARDS (M-Pesa Transactions modal) ── */
+  .tx-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
+  .tx-list::-webkit-scrollbar { width: 4px; }
+  .tx-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .tx-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; transition: background .12s, border-color .12s; }
+  .tx-card.tx-unmatched { cursor: pointer; }
+  .tx-card.tx-unmatched:hover { background: var(--surface2); border-color: var(--accent); }
+  .tx-card.tx-matched { opacity: .5; cursor: default; }
+  .tx-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .tx-receipt { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .tx-amount  { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); }
+  .tx-card-bottom { display: flex; justify-content: space-between; align-items: center; }
+  .tx-phone { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .tx-time  { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .tx-badge { font-size: 10px; font-family: var(--mono); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 10px; }
+  .tx-badge.matched   { background: rgba(0,229,160,.1);  color: var(--accent); }
+  .tx-badge.unmatched { background: rgba(255,184,48,.12); color: var(--warn); }
 </style>
 </head>
 <body>
 
-<!-- ══════ TOP BAR (unchanged) ══════ -->
+<!-- TOP BAR -->
 <div class="topbar">
-  <div class="topbar-brand"     onclick="window.location.href='/think-twice/dashboard.php'"
-    style="cursor:pointer;"
->&#9632; POS Terminal</div>
+  <div class="topbar-brand"  onclick="window.location.href='/think-twice/dashboard.php'"
+    style="cursor:pointer;">&#9632; POS Terminal — Think Twice</div>
   <div class="topbar-meta">
     Cashier: <span>Admin</span> &nbsp;|&nbsp;
     Date: <span><?= date('d M Y') ?></span> &nbsp;|&nbsp;
@@ -589,7 +619,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 <!-- MAIN LAYOUT -->
 <div class="pos-layout">
 
-  <!-- ── LEFT: SEARCH + CART (unchanged) ── -->
+  <!-- ── LEFT: SEARCH + CART ── -->
   <div class="pos-left">
     <form method="POST" class="search-bar">
       <input type="text" name="code" placeholder="Scan or enter barcode…" autofocus autocomplete="off">
@@ -652,7 +682,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     </div>
   </div>
 
-  <!-- ── RIGHT PANEL [CHANGED: added M-Pesa and Split buttons] ── -->
+  <!-- ── RIGHT PANEL ── -->
   <div class="pos-right">
     <div class="panel-title">Actions</div>
 
@@ -660,12 +690,10 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
       <span class="icon-dot dot-green"></span> Cash Payment
     </button>
 
-    <!-- [NEW] M-Pesa full payment button -->
     <button type="button" class="action-btn" onclick="openMpesaModal('mpesa')">
       <span class="icon-dot dot-mpesa"></span> M-Pesa Payment
     </button>
 
-    <!-- [NEW] Split: part cash + part M-Pesa -->
     <button type="button" class="action-btn" onclick="openModal('split-modal')">
       <span class="icon-dot dot-split"></span> Split Payment
     </button>
@@ -678,9 +706,15 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
       <?php endif; ?>
     </button>
 
-    <a href="/think-twice/inventory/wareHousing.php" class="action-btn">
+    <!-- UPDATED: links to main Inventory dashboard, not just warehousing -->
+    <a href="/think-twice/itemsandInventory.php" class="action-btn">
       <span class="icon-dot dot-blue"></span> View Inventory
     </a>
+
+    <!-- NEW: view today's M-Pesa transaction callbacks -->
+    <button type="button" class="action-btn" onclick="openTxModal()">
+      <span class="icon-dot dot-orange"></span> M-Pesa Transactions
+    </button>
 
     <div style="padding: 12px 14px 4px; border-top: 1px solid var(--border); margin-top: auto;">
       <button type="button" onclick="openModal('cash-modal')" class="action-btn full-pay">
@@ -696,7 +730,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
      MODALS
 ══════════════════════════════════════════════════════════════════════════ -->
 
-<!-- CASH PAYMENT MODAL (mostly unchanged, success now handled by redirect) -->
+<!-- CASH PAYMENT MODAL -->
 <div class="modal-backdrop" id="cash-modal">
   <div class="modal">
     <div class="modal-title">Cash Payment</div>
@@ -721,9 +755,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   </div>
 </div>
 
-<!-- [NEW] M-PESA PAYMENT MODAL ────────────────────────────────────────────
-     Used for both full M-Pesa payment and as the STK prompt step in split.
-     JS sets the amount and label before opening.                           -->
+<!-- M-PESA PAYMENT MODAL -->
 <div class="modal-backdrop" id="mpesa-modal">
   <div class="modal">
     <div class="modal-title" id="mpesa-modal-title">M-Pesa Payment</div>
@@ -735,7 +767,6 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 
     <br>
     <label>Customer Phone Number</label>
-    <!-- tel type helps mobile keyboards show a numpad -->
     <input type="tel" id="mpesa-phone" placeholder="07XX XXX XXX" style="margin-bottom:8px">
     <p style="font-size:11px; color:var(--muted); font-family:var(--mono); margin-bottom:16px">
       Formats accepted: 07XX, +2547XX, 2547XX
@@ -751,13 +782,24 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
       <button type="button" class="btn btn-mpesa" id="btn-send-stk" onclick="sendStkPush()">
         Send STK Push
       </button>
+      <!-- NEW: appears after polling times out; lets cashier pick from callbacks -->
+      <button type="button" id="btn-manual-tx" class="btn btn-warn"
+              style="display:none; flex:none; font-size:12px; padding:10px 12px"
+              onclick="cancelMpesa(); openTxModal()">
+        📋 Manual Confirm
+      </button>
       <button type="button" class="btn btn-ghost" onclick="cancelMpesa()">Cancel</button>
     </div>
+
+    <!-- Tip shown after timeout -->
+    <p id="stk-timeout-tip" style="display:none; font-size:11px; color:var(--muted); font-family:var(--mono); margin-top:10px; text-align:center; line-height:1.5">
+      Polling timed out — this is common in Sandbox.<br>
+      Use <strong style="color:var(--warn)">Manual Confirm</strong> to select the M-Pesa receipt from callbacks.
+    </p>
   </div>
 </div>
 
-<!-- [NEW] SPLIT PAYMENT MODAL ──────────────────────────────────────────────
-     Customer pays part in cash and the remainder via M-Pesa STK push.     -->
+<!-- SPLIT PAYMENT MODAL -->
 <div class="modal-backdrop" id="split-modal">
   <div class="modal">
     <div class="modal-title">Split Payment — Cash + M-Pesa</div>
@@ -769,7 +811,6 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     <br>
 
     <label>Cash Amount (KES)</label>
-    <!-- oninput recalculates the M-Pesa portion dynamically -->
     <input type="number" id="split-cash" min="0" step="0.01" placeholder="0.00"
       max="<?= $grandTotal ?>"
       oninput="updateSplitRemainder()">
@@ -781,15 +822,13 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     <p class="split-hint">Enter 0 for full M-Pesa payment</p>
 
     <div class="modal-actions">
-      <!-- Clicking this pre-fills the M-Pesa modal with the remainder and opens it -->
       <button type="button" class="btn btn-mpesa" onclick="proceedSplit()">Next → M-Pesa STK</button>
       <button type="button" class="btn btn-ghost" onclick="closeModal('split-modal')">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- [NEW] RECEIPT MODAL ────────────────────────────────────────────────────
-     Shown after any successful payment. PHP pre-renders the receipt HTML.  -->
+<!-- RECEIPT MODAL -->
 <div class="modal-backdrop <?= $showReceipt ? 'open' : '' ?>" id="receipt-modal">
   <div class="modal" style="width:420px">
     <div class="modal-title">✓ Payment Complete</div>
@@ -798,13 +837,15 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
     <div class="receipt-body" id="receipt-content">
 
       <div class="receipt-header">
-        <h2>THINK TWICE</h2>
+        <h2>THINK TWICE CASE STUDY SHOP</h2>
         <p>Point of Sale Receipt</p>
         <p><?= htmlspecialchars($receipt['date']) ?> &nbsp;|&nbsp; Cashier: <?= htmlspecialchars($receipt['cashier']) ?></p>
         <p style="font-size:10px; color:#999"><?= htmlspecialchars($receipt['receipt_no']) ?></p>
+        <?php if (!empty($receipt['mpesa_receipt'])): ?>
+        <p style="font-size:10px; color:#555; margin-top:4px">M-Pesa Ref: <?= htmlspecialchars($receipt['mpesa_receipt']) ?></p>
+        <?php endif; ?>
       </div>
 
-      <!-- Items list -->
       <table class="receipt-items">
         <thead>
           <tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr>
@@ -821,31 +862,23 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
         </tbody>
       </table>
 
-      <!-- Totals + payment breakdown -->
       <div class="receipt-totals">
         <div class="r-row total">
           <span>TOTAL</span><span>KES <?= number_format($receipt['total'], 2) ?></span>
         </div>
-
-        <?php
-          // Show payment breakdown based on method
-          $method = $receipt['method'];
-        ?>
-
+        <?php $method = $receipt['method']; ?>
         <?php if ($method === 'cash' || $method === 'split'): ?>
         <div class="r-row">
           <span>Cash Paid</span>
           <span>KES <?= number_format($receipt['cash_paid'], 2) ?></span>
         </div>
         <?php endif; ?>
-
         <?php if ($method === 'mpesa' || $method === 'split'): ?>
         <div class="r-row">
           <span>M-Pesa Paid</span>
           <span>KES <?= number_format($receipt['mpesa_paid'], 2) ?></span>
         </div>
         <?php endif; ?>
-
         <?php if ($receipt['change'] > 0): ?>
         <div class="r-row change">
           <span>Change Returned</span>
@@ -865,7 +898,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
         <br>Thank you for shopping with us!<br>
         Goods once sold are not returnable.
       </div>
-    </div><!-- /receipt-body -->
+    </div>
 
     <div class="modal-actions" style="margin-top:16px">
       <button type="button" class="btn btn-primary" onclick="printReceipt()">🖨 Print</button>
@@ -879,7 +912,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   </div>
 </div>
 
-<!-- PAUSE CART MODAL (unchanged) -->
+<!-- PAUSE CART MODAL -->
 <div class="modal-backdrop" id="hold-modal">
   <div class="modal">
     <div class="modal-title">Pause / Hold Cart</div>
@@ -894,7 +927,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   </div>
 </div>
 
-<!-- HELD CARTS MODAL (unchanged) -->
+<!-- HELD CARTS MODAL -->
 <div class="modal-backdrop" id="held-modal">
   <div class="modal" style="width:420px">
     <div class="modal-title">Paused Carts</div>
@@ -922,16 +955,58 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   </div>
 </div>
 
-<!-- [NEW] PRINT AREA — hidden on screen, only rendered during window.print() -->
+<!-- ══ NEW: M-PESA TRANSACTIONS MODAL ══════════════════════════════════════
+     Lists today's callback-confirmed payments. Cashier can select one to
+     manually close the current sale when STK polling never resolves.       -->
+<div class="modal-backdrop" id="tx-modal">
+  <div class="modal" style="width:500px; max-width:96vw">
+    <div class="modal-title">📋 Today's M-Pesa Transactions</div>
+    <p style="font-size:11px; color:var(--muted); font-family:var(--mono); margin-bottom:14px; line-height:1.5">
+      These are payments confirmed by Safaricom callbacks.
+      Click an <span style="color:var(--warn)">unmatched</span> transaction to close the current sale with it.
+    </p>
+    <div class="tx-list" id="tx-list">
+      <p style="color:var(--muted); font-size:13px; text-align:center; padding:20px">Loading…</p>
+    </div>
+    <div class="modal-actions" style="margin-top:16px; flex-wrap:wrap; gap:8px">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="loadTransactions()">↻ Refresh</button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('tx-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ NEW: MANUAL CONFIRM MODAL ══════════════════════════════════════════ -->
+<div class="modal-backdrop" id="manual-confirm-modal">
+  <div class="modal">
+    <div class="modal-title">✓ Manual M-Pesa Confirmation</div>
+    <div id="manual-tx-details"></div>
+    <div style="background:rgba(255,184,48,.08); border:1px solid rgba(255,184,48,.25); border-radius:8px; padding:12px; font-size:12px; font-family:var(--mono); color:var(--warn); line-height:1.6; margin-bottom:4px;">
+      ⚠ Verify that this M-Pesa receipt belongs to the current customer before confirming.
+      This action cannot be undone.
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" id="btn-manual-confirm" onclick="submitManualConfirm()">
+        Confirm &amp; Close Sale
+      </button>
+      <button type="button" class="btn btn-ghost" onclick="closeModal('manual-confirm-modal'); openTxModal()">
+        Back
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- PRINT AREA -->
 <div id="print-area">
   <?php if ($receipt): ?>
   <div class="receipt-body">
-    <!-- Receipt content is duplicated here so @media print can isolate it -->
     <div class="receipt-header">
-      <h2>THINK TWICE</h2>
+      <h2>THINK TWICE CASE STUDY SHOP</h2>
       <p>Point of Sale Receipt</p>
       <p><?= htmlspecialchars($receipt['date']) ?> | Cashier: <?= htmlspecialchars($receipt['cashier']) ?></p>
       <p><?= htmlspecialchars($receipt['receipt_no']) ?></p>
+      <?php if (!empty($receipt['mpesa_receipt'])): ?>
+      <p>M-Pesa Ref: <?= htmlspecialchars($receipt['mpesa_receipt']) ?></p>
+      <?php endif; ?>
     </div>
     <table class="receipt-items" style="width:100%; border-collapse:collapse; font-family:monospace; font-size:12px; margin-bottom:10px;">
       <thead><tr><th style="text-align:left">Item</th><th>Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr></thead>
@@ -978,7 +1053,7 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
      JAVASCRIPT
 ══════════════════════════════════════════════════════════════════════════ -->
 <script>
-// ── Existing modal helpers ───────────────────────────────────────────────────
+// ── Modal helpers ────────────────────────────────────────────────────────────
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -986,12 +1061,10 @@ document.querySelectorAll('.modal-backdrop').forEach(el => {
     el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
 });
 
-// ── Grand total from PHP (used by JS calculations) ───────────────────────────
-const GRAND_TOTAL = <?= json_encode($grandTotal) ?>; // injected from PHP
+// Grand total from PHP
+const GRAND_TOTAL = <?= json_encode($grandTotal) ?>;
 
-// ── [NEW] SPLIT PAYMENT HELPERS ─────────────────────────────────────────────
-
-// Called on every keystroke in the split cash input
+// ── SPLIT PAYMENT ────────────────────────────────────────────────────────────
 function updateSplitRemainder() {
     const cash      = parseFloat(document.getElementById('split-cash').value) || 0;
     const remainder = Math.max(0, GRAND_TOTAL - cash);
@@ -999,7 +1072,6 @@ function updateSplitRemainder() {
         'KES ' + remainder.toFixed(2);
 }
 
-// When user clicks "Next → M-Pesa STK" in the split modal
 function proceedSplit() {
     const cash      = parseFloat(document.getElementById('split-cash').value) || 0;
     const remainder = GRAND_TOTAL - cash;
@@ -1009,24 +1081,20 @@ function proceedSplit() {
         return;
     }
     if (remainder <= 0) {
-        // If cash covers everything, just treat as cash-only — close and open cash modal
         closeModal('split-modal');
         openModal('cash-modal');
         return;
     }
 
-    // Store the split amounts so sendStkPush() knows the context
     window._splitCash    = cash;
     window._splitMpesa   = remainder;
-    window._paymentMode  = 'split';   // tells finalizeSale which method to report
+    window._paymentMode  = 'split';
 
     closeModal('split-modal');
-    // Open M-Pesa modal pre-filled with the M-Pesa portion
     openMpesaModal('split', remainder, cash);
 }
 
-// ── [NEW] OPEN M-PESA MODAL ──────────────────────────────────────────────────
-// mode: 'mpesa' = full payment, 'split' = partial
+// ── M-PESA MODAL ─────────────────────────────────────────────────────────────
 function openMpesaModal(mode, mpesaAmount, cashAmount) {
     mpesaAmount = mpesaAmount ?? GRAND_TOTAL;
     cashAmount  = cashAmount  ?? 0;
@@ -1035,7 +1103,6 @@ function openMpesaModal(mode, mpesaAmount, cashAmount) {
     window._mpesaAmount = mpesaAmount;
     window._cashAmount  = cashAmount;
 
-    // Update modal labels
     document.getElementById('mpesa-modal-title').textContent =
         mode === 'split' ? 'M-Pesa — Split Payment' : 'M-Pesa Payment';
     document.getElementById('mpesa-amount-label').textContent =
@@ -1043,16 +1110,14 @@ function openMpesaModal(mode, mpesaAmount, cashAmount) {
     document.getElementById('mpesa-amount-display').textContent =
         'KES ' + mpesaAmount.toFixed(2);
 
-    // Reset STK status display
     resetStkStatus();
-
     openModal('mpesa-modal');
 }
 
-// ── [NEW] SEND STK PUSH ──────────────────────────────────────────────────────
-// Fires a fetch() to ?action=stk_push on this same file.
-// Safaricom's server processes it and sends a payment prompt to the phone.
-let _pollInterval = null;   // holds the setInterval reference for polling
+// ── STK PUSH ─────────────────────────────────────────────────────────────────
+let _pollInterval = null;
+let _pollCount    = 0;
+const MAX_POLLS   = 24;   // 24 × 5 s = 2 minutes then show manual confirm
 
 async function sendStkPush() {
     const phone  = document.getElementById('mpesa-phone').value.trim();
@@ -1061,14 +1126,14 @@ async function sendStkPush() {
     if (!phone) { alert('Please enter a phone number.'); return; }
     if (!amount || amount <= 0) { alert('Invalid amount.'); return; }
 
-    // Disable the button to prevent double-submission
-    document.getElementById('btn-send-stk').disabled = true;
+    document.getElementById('btn-send-stk').disabled    = true;
     document.getElementById('btn-send-stk').textContent = 'Sending…';
+    document.getElementById('btn-manual-tx').style.display   = 'none';
+    document.getElementById('stk-timeout-tip').style.display = 'none';
     showStkStatus('waiting', '⟳ Waiting for customer to pay…');
+    _pollCount = 0;
 
     try {
-        // ── POST to ?action=stk_push ─────────────────────────────────────
-        // This calls Safaricom's sandbox API and sends the STK prompt to the phone.
         const res  = await fetch('pos.php?action=stk_push', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1077,12 +1142,9 @@ async function sendStkPush() {
         const data = await res.json();
 
         if (data.ResponseCode === '0') {
-            // ResponseCode 0 = STK sent successfully (not yet paid — just sent)
             showStkStatus('waiting', '⟳ Prompt sent! Waiting for PIN entry…');
-            // Start polling every 5 seconds to check if customer completed payment
             _pollInterval = setInterval(pollStkStatus, 5000);
         } else {
-            // Safaricom rejected the request (bad phone, bad credentials, etc.)
             showStkStatus('failed', '✗ Failed: ' + (data.errorMessage || data.ResponseDescription || 'Unknown error'));
             resetStkButton();
         }
@@ -1092,10 +1154,23 @@ async function sendStkPush() {
     }
 }
 
-// ── [NEW] POLL STK STATUS ────────────────────────────────────────────────────
-// Called every 5 s after STK push to check if customer paid.
-// Stops polling when a definitive result is received.
+// ── STK POLL ─────────────────────────────────────────────────────────────────
+// Polls every 5 s. After MAX_POLLS (~2 min) stops and reveals Manual Confirm.
+// This handles the sandbox flaw where the query endpoint never returns code 0
+// even after the customer has already paid and the callback has fired.
 async function pollStkStatus() {
+    _pollCount++;
+
+    // ── Timeout: stop polling, surface manual confirm ─────────────────────
+    if (_pollCount > MAX_POLLS) {
+        clearInterval(_pollInterval);
+        showStkStatus('failed', '⏱ Polling timed out.');
+        document.getElementById('btn-manual-tx').style.display   = 'inline-flex';
+        document.getElementById('stk-timeout-tip').style.display = 'block';
+        resetStkButton();
+        return;
+    }
+
     try {
         const res  = await fetch('pos.php?action=stk_query');
         const data = await res.json();
@@ -1103,35 +1178,28 @@ async function pollStkStatus() {
         const code = parseInt(data.ResultCode ?? data.result ?? -1);
 
         if (code === 0) {
-            // ── SUCCESS: Customer entered PIN and paid ────────────────────
             clearInterval(_pollInterval);
             showStkStatus('success', '✓ Payment received!');
-            // Wait 1 second so the user can see the success message, then finalize
             setTimeout(() => finalizeSale(), 1000);
 
         } else if (code === 1032 || code === 1037) {
-            // 1032 = cancelled by user, 1037 = timeout (no response)
             clearInterval(_pollInterval);
             const msg = code === 1032
                 ? '✗ Customer cancelled the payment.'
                 : '✗ Payment timed out. Please try again.';
             showStkStatus('failed', msg);
             resetStkButton();
-
         }
-        // Any other code (or undefined) means still processing — keep polling
+        // Other codes = still processing — keep polling
 
     } catch (err) {
-        // Network hiccup — keep polling, don't give up
         console.warn('Poll error (will retry):', err);
     }
 }
 
-// ── [NEW] FINALIZE SALE ──────────────────────────────────────────────────────
-// Called after payment is confirmed. Tells PHP to save receipt + clear cart,
-// then redirects to ?show_receipt=1 so the receipt modal renders from PHP.
+// ── FINALIZE SALE ────────────────────────────────────────────────────────────
 async function finalizeSale() {
-    const mode     = window._paymentMode ?? 'mpesa';
+    const mode      = window._paymentMode ?? 'mpesa';
     const mpesaPaid = window._mpesaAmount ?? 0;
     const cashPaid  = window._cashAmount  ?? 0;
 
@@ -1139,16 +1207,11 @@ async function finalizeSale() {
         const res  = await fetch('pos.php?action=finalize_sale', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({
-                method:     mode,
-                mpesa_paid: mpesaPaid,
-                cash_paid:  cashPaid,
-            }),
+            body:    JSON.stringify({ method: mode, mpesa_paid: mpesaPaid, cash_paid: cashPaid }),
         });
         const data = await res.json();
 
         if (data.success) {
-            // Redirect — PHP will see ?show_receipt=1 and auto-open the receipt modal
             window.location.href = 'pos.php?show_receipt=1';
         } else {
             alert('Error finalising sale: ' + (data.error ?? 'Unknown'));
@@ -1158,19 +1221,21 @@ async function finalizeSale() {
     }
 }
 
-// ── [NEW] CANCEL M-PESA ──────────────────────────────────────────────────────
+// ── CANCEL M-PESA ────────────────────────────────────────────────────────────
 function cancelMpesa() {
-    clearInterval(_pollInterval);   // stop polling if running
+    clearInterval(_pollInterval);
     resetStkStatus();
     resetStkButton();
+    document.getElementById('btn-manual-tx').style.display   = 'none';
+    document.getElementById('stk-timeout-tip').style.display = 'none';
     closeModal('mpesa-modal');
 }
 
-// ── [NEW] STK UI HELPERS ─────────────────────────────────────────────────────
+// ── STK UI HELPERS ───────────────────────────────────────────────────────────
 function showStkStatus(state, text) {
     const box  = document.getElementById('stk-status-box');
     const span = document.getElementById('stk-status-text');
-    box.className  = 'stk-status ' + state;   // applies CSS: waiting/success/failed
+    box.className    = 'stk-status ' + state;
     span.textContent = text;
     document.getElementById('stk-spin').style.display =
         state === 'waiting' ? 'inline' : 'none';
@@ -1184,18 +1249,128 @@ function resetStkButton() {
     btn.textContent = 'Send STK Push';
 }
 
-// ── [NEW] PRINT RECEIPT ──────────────────────────────────────────────────────
-// Uses CSS @media print (defined in <style>) to show only #print-area on paper.
-function printReceipt() {
-    window.print();
+// ── PRINT RECEIPT ────────────────────────────────────────────────────────────
+function printReceipt() { window.print(); }
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  TRANSACTIONS MODAL — browse & manually match M-Pesa callbacks
+// ═════════════════════════════════════════════════════════════════════════════
+let _selectedTxId     = null;
+let _selectedTxAmount = 0;
+
+async function openTxModal() {
+    openModal('tx-modal');
+    await loadTransactions();
 }
 
-// Auto-open receipt modal if PHP redirected here with ?show_receipt=1
+async function loadTransactions() {
+    const list = document.getElementById('tx-list');
+    list.innerHTML = '<p style="color:var(--muted);font-size:13px;text-align:center;padding:20px">Loading…</p>';
+
+    try {
+        const res  = await fetch('pos.php?action=get_transactions');
+        const data = await res.json();
+
+        if (data.error) {
+            list.innerHTML = `<p style="color:var(--danger);font-size:13px;text-align:center;padding:20px">
+                DB error: ${data.error}</p>`;
+            return;
+        }
+
+        if (!Array.isArray(data) || data.length === 0) {
+            list.innerHTML = `<p style="color:var(--muted);font-size:13px;text-align:center;padding:20px">
+                No M-Pesa transactions recorded today.</p>`;
+            return;
+        }
+
+        list.innerHTML = data.map(tx => {
+            const matched = parseInt(tx.matched) === 1;
+            const amount  = parseFloat(tx.amount).toFixed(2);
+            const time    = tx.created_at ? tx.created_at.slice(11, 16) : '—';
+            const phone   = tx.phone || '—';
+            const receipt = tx.mpesa_receipt || '—';
+
+            return `
+            <div class="tx-card ${matched ? 'tx-matched' : 'tx-unmatched'}"
+                 ${!matched ? `onclick="selectTx(${tx.id}, ${tx.amount}, '${receipt}', '${phone}')"` : ''}>
+              <div class="tx-card-top">
+                <span class="tx-receipt">${receipt}</span>
+                <span class="tx-amount">KES ${amount}</span>
+              </div>
+              <div class="tx-card-bottom">
+                <span class="tx-phone">${phone}</span>
+                <span class="tx-time">${time}</span>
+                <span class="tx-badge ${matched ? 'matched' : 'unmatched'}">
+                  ${matched ? 'Matched' : 'Tap to use'}
+                </span>
+              </div>
+            </div>`;
+        }).join('');
+
+    } catch (err) {
+        list.innerHTML = `<p style="color:var(--danger);font-size:13px;text-align:center;padding:20px">
+            Network error loading transactions.</p>`;
+    }
+}
+
+function selectTx(id, amount, receipt, phone) {
+    _selectedTxId     = id;
+    _selectedTxAmount = parseFloat(amount);
+
+    document.getElementById('manual-tx-details').innerHTML = `
+        <div class="modal-row"><span class="lbl">M-Pesa Receipt</span><span class="val">${receipt}</span></div>
+        <div class="modal-row"><span class="lbl">Phone</span><span class="val">${phone}</span></div>
+        <div class="modal-row"><span class="lbl">M-Pesa Amount</span><span class="val val-big">KES ${_selectedTxAmount.toFixed(2)}</span></div>
+        <div class="modal-row" style="margin-bottom:12px"><span class="lbl">Sale Total</span><span class="val">KES ${GRAND_TOTAL.toFixed(2)}</span></div>
+    `;
+
+    closeModal('tx-modal');
+    openModal('manual-confirm-modal');
+}
+
+async function submitManualConfirm() {
+    if (!_selectedTxId) return;
+
+    const btn = document.getElementById('btn-manual-confirm');
+    btn.disabled    = true;
+    btn.textContent = 'Processing…';
+
+    const mode     = window._paymentMode ?? 'mpesa';
+    const cashPaid = window._cashAmount  ?? 0;
+
+    try {
+        const res  = await fetch('pos.php?action=manual_confirm', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+                transaction_id: _selectedTxId,
+                method:         mode,
+                cash_paid:      cashPaid,
+                mpesa_paid:     _selectedTxAmount,
+            }),
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            window.location.href = 'pos.php?show_receipt=1';
+        } else {
+            alert('Error: ' + (data.error ?? 'Unknown error'));
+            btn.disabled    = false;
+            btn.textContent = 'Confirm & Close Sale';
+        }
+    } catch (err) {
+        alert('Network error. Please try again.');
+        btn.disabled    = false;
+        btn.textContent = 'Confirm & Close Sale';
+    }
+}
+
+// Auto-open receipt modal if redirected with ?show_receipt=1
 <?php if ($showReceipt): ?>
 openModal('receipt-modal');
 <?php endif; ?>
 
-// Auto-open cash modal if there was a cash payment error (keep existing behaviour)
+// Auto-open cash modal if payment was short
 <?php if (isset($_POST['check-balance']) && $error): ?>
 openModal('cash-modal');
 <?php endif; ?>

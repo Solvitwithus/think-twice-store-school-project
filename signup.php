@@ -1,4 +1,3 @@
-
 <?php
 require __DIR__ . '/config/db.php';
 
@@ -114,147 +113,82 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up</title>
-
+    <title>Sign Up - Think Twice</title>
+    <link rel="stylesheet" href="/think-twice/public/theme.css">
     <style>
-        * {
-            box-sizing: border-box;
-            font-family: Arial, sans-serif;
-        }
-
         body {
-            margin: 0;
-            background: #f4f6f9;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
+            height: 100vh;
+            margin: 0;
         }
-
-        .signup-container {
+        .auth-container {
             width: 100%;
             max-width: 400px;
-            padding: 30px;
-            background: #fff;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 40px;
         }
-
-        .signup-container h2 {
+        .auth-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            padding: var(--space-xl);
+            box-shadow: var(--shadow-lg);
+        }
+        .auth-header {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: var(--space-xl);
         }
-
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 10px 12px;
-            border-radius: 6px;
-            margin-bottom: 15px;
+        .auth-brand {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+        .auth-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+        .auth-subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .auth-footer {
+            text-align: center;
+            margin-top: var(--space-lg);
             font-size: 13px;
         }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            margin-bottom: 15px;
-        }
-
-        .form-group label {
-            margin-bottom: 5px;
-            font-size: 14px;
-            color: #333;
-        }
-
-        .form-group input {
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-size: 14px;
-        }
-
-        .form-group input:focus {
-            border-color: #007bff;
-            outline: none;
-        }
-
-        .error {
-            color: #dc3545;
-            font-size: 12px;
-            margin-top: 5px;
-        }
-
-        .btn {
-            width: 100%;
-            padding: 10px;
-            font-size: 16px;
-            border: none;
-            border-radius: 5px;
-            background: #007bff;
-            color: #fff;
-            cursor: pointer;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn:hover {
-            background: #0056b3;
-        }
-
-        .btn:disabled {
-            background: #7aa7e0;
-            cursor: not-allowed;
-        }
-
-        .footer-text {
-            text-align: center;
-            margin-top: 15px;
-            font-size: 14px;
-        }
-
-        .footer-text a {
-            color: #007bff;
+        .auth-footer a {
+            color: var(--primary);
             text-decoration: none;
+            font-weight: 600;
         }
-
-        .footer-text a:hover {
+        .auth-footer a:hover {
             text-decoration: underline;
-        }
-
-        .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #fff;
-            border-top: 2px solid transparent;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
         }
     </style>
 </head>
 <body>
 
-<div class="signup-container">
-
-    <h2>Create Account</h2>
+<div class="auth-container">
+  <div class="auth-box">
+    <div class="auth-header">
+      <div class="auth-brand">◊</div>
+      <div class="auth-title">Create Account</div>
+      <div class="auth-subtitle">Join Think Twice</div>
+    </div>
 
     <?php if ($error): ?>
-        <div class="alert-error">
-            <?= htmlspecialchars($error) ?>
-        </div>
+      <div class="alert alert-danger">
+        <?= htmlspecialchars($error) ?>
+      </div>
     <?php endif; ?>
 
     <form id="signupForm" method="POST">
@@ -300,6 +234,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 name="password"
                 required
             >
+            <small class="text-muted" style="margin-top: 4px; display: block;">Min 8 chars, uppercase, lowercase, number, special char</small>
         </div>
 
         <div class="form-group">
@@ -310,20 +245,20 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 name="confirmPassword"
                 required
             >
-            <div id="errorMsg" class="error"></div>
+            <div id="errorMsg" style="color: var(--danger); font-size: 12px; margin-top: 4px;"></div>
         </div>
 
-        <button type="submit" class="btn" id="submitBtn">
-            <span id="btnText">Sign Up</span>
+        <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn">
+            <span id="btnText">Create Account</span>
         </button>
 
     </form>
 
-    <div class="footer-text">
+    <div class="auth-footer">
         Already have an account?
         <a href="/think-twice">Login</a>
     </div>
-
+  </div>
 </div>
 
 <script>
@@ -357,4 +292,3 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 </body>
 </html>
-
