@@ -1,9 +1,10 @@
 <?php
+session_start();
 require __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/authGuard.php';
+requireLogin();
 
-// =====================================================================
-// AJAX HANDLERS — before any HTML output
-// =====================================================================
+// ── AJAX HANDLERS ────────────────────────────────────────────────────────────
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if (isset($_POST['inline-edit'])) {
@@ -39,14 +40,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 }
 
-// =====================================================================
-// HANDLE MAIN FORM SUBMISSION
-// =====================================================================
 $error   = '';
 $success = '';
 
 if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
-
     $item_id      = $_POST['itemSelectedId'] ?? null;
     $quantity     = (int)($_POST['quantity']  ?? 0);
     $movementType = $_POST['movementType']    ?? null;
@@ -62,14 +59,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
         try {
             $conn->beginTransaction();
 
-            // ----------------------------------------------------------
-            // 1. Fetch item details from items table
-            // ----------------------------------------------------------
-            $stmt = $conn->prepare("
-                SELECT id, item_name, barcode, selling_price
-                FROM items
-                WHERE id = :id AND status = 'active'
-            ");
+            $stmt = $conn->prepare("SELECT id, item_name, barcode, selling_price FROM items WHERE id = :id AND status = 'active'");
             $stmt->execute(['id' => $item_id]);
             $itemRow = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$itemRow) throw new Exception("Item not found or inactive.");
@@ -77,79 +67,45 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
             $itemName = $itemRow['item_name'];
             $barcode  = $itemRow['barcode'];
 
-            // ----------------------------------------------------------
-            // 2. Fetch the single existing row for this item (if any)
-            // ----------------------------------------------------------
-            $stmt2 = $conn->prepare("
-                SELECT id, quantity FROM stock_movements WHERE barcode = :barcode LIMIT 1
-            ");
+            $stmt2 = $conn->prepare("SELECT id, quantity FROM stock_movements WHERE barcode = :barcode LIMIT 1");
             $stmt2->execute(['barcode' => $barcode]);
-            $existing = $stmt2->fetch(PDO::FETCH_ASSOC);
+            $existing   = $stmt2->fetch(PDO::FETCH_ASSOC);
             $currentQty = $existing ? (int)$existing['quantity'] : 0;
 
-            // ----------------------------------------------------------
-            // 3. Calculate new quantity based on movement type
-            //    IN  → add to current
-            //    OUT → subtract from current
-            //    ADJUSTMENT → overwrite directly
-            // ----------------------------------------------------------
             if ($movementType === 'ADJUSTMENT') {
-                $newQty = $quantity;   // direct overwrite
+                $newQty = $quantity;
             } elseif ($movementType === 'IN') {
                 $newQty = $currentQty + $quantity;
-            } else { // OUT
+            } else {
                 $newQty = $currentQty - $quantity;
-                if ($newQty < 0) throw new Exception("Not enough stock. Current stock: {$currentQty}.");
+                if ($newQty < 0) throw new Exception("Not enough stock. Current: {$currentQty}.");
             }
 
-            // ----------------------------------------------------------
-            // 4. Fetch effective price (active price cycle or selling_price)
-            // ----------------------------------------------------------
             $priceStmt = $conn->prepare("
-                SELECT
-                    CASE
-                        WHEN pc.id IS NOT NULL
-                             AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days
-                        THEN GREATEST(0,
-                                pc.base_price
-                                - (DATEDIFF(CURDATE(), pc.cycle_start) * pc.daily_reduction)
-                             )
-                        ELSE COALESCE(i.selling_price, 0)
-                    END AS effective_price
+                SELECT CASE
+                    WHEN pc.id IS NOT NULL AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days
+                    THEN GREATEST(0, pc.base_price - (DATEDIFF(CURDATE(), pc.cycle_start) * pc.daily_reduction))
+                    ELSE COALESCE(i.selling_price, 0)
+                END AS effective_price
                 FROM items i
                 LEFT JOIN price_cycles pc ON pc.item_id = i.id AND pc.is_active = 1
-                WHERE i.id = :item_id
-                LIMIT 1
+                WHERE i.id = :item_id LIMIT 1
             ");
             $priceStmt->execute(['item_id' => $item_id]);
             $priceRow       = $priceStmt->fetch(PDO::FETCH_ASSOC);
             $effectivePrice = $priceRow ? (float)$priceRow['effective_price'] : (float)$itemRow['selling_price'];
 
-            // ----------------------------------------------------------
-            // 5. UPDATE existing row, or INSERT if this item has no row yet
-            //    movement_type saved reflects the last operation performed
-            // ----------------------------------------------------------
             if ($existing) {
                 $conn->prepare("
-                    UPDATE stock_movements
-                    SET item_name     = :item_name,
-                        quantity      = :qty,
-                        movement_type = :type,
-                        is_ironed     = :ironed,
-                        is_steamed    = :steamed,
-                        is_hanged     = :hanged,
-                        price         = :price,
-                        created_at    = NOW()
+                    UPDATE stock_movements SET
+                        item_name = :item_name, quantity = :qty, movement_type = :type,
+                        is_ironed = :ironed, is_steamed = :steamed, is_hanged = :hanged,
+                        price = :price, created_at = NOW()
                     WHERE id = :id
                 ")->execute([
-                    'item_name' => $itemName,
-                    'qty'       => $newQty,
-                    'type'      => $movementType,
-                    'ironed'    => $isIroned,
-                    'steamed'   => $isSteamed,
-                    'hanged'    => $isHanged,
-                    'price'     => $effectivePrice,
-                    'id'        => $existing['id'],
+                    'item_name' => $itemName, 'qty' => $newQty, 'type' => $movementType,
+                    'ironed'    => $isIroned, 'steamed' => $isSteamed, 'hanged' => $isHanged,
+                    'price'     => $effectivePrice, 'id' => $existing['id'],
                 ]);
                 $action = match($movementType) {
                     'IN'         => "Added {$quantity} → new stock: {$newQty}",
@@ -159,26 +115,16 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
             } else {
                 if ($movementType === 'OUT') throw new Exception("Cannot stock out — no existing record for this item.");
                 $conn->prepare("
-                    INSERT INTO stock_movements
-                        (item_name, barcode, quantity, movement_type,
-                         is_ironed, is_steamed, is_hanged, price)
-                    VALUES
-                        (:item_name, :barcode, :qty, :type,
-                         :ironed, :steamed, :hanged, :price)
+                    INSERT INTO stock_movements (item_name, barcode, quantity, movement_type, is_ironed, is_steamed, is_hanged, price)
+                    VALUES (:item_name, :barcode, :qty, :type, :ironed, :steamed, :hanged, :price)
                 ")->execute([
-                    'item_name' => $itemName,
-                    'barcode'   => $barcode,
-                    'qty'       => $newQty,
-                    'type'      => $movementType,
-                    'ironed'    => $isIroned,
-                    'steamed'   => $isSteamed,
-                    'hanged'    => $isHanged,
-                    'price'     => $effectivePrice,
+                    'item_name' => $itemName, 'barcode' => $barcode, 'qty' => $newQty, 'type' => $movementType,
+                    'ironed'    => $isIroned, 'steamed' => $isSteamed, 'hanged' => $isHanged, 'price' => $effectivePrice,
                 ]);
                 $action = "Stock created → quantity: {$newQty}";
             }
 
-            $success = $action . " for \"{$itemName}\".";
+            $success = $action . " for \"$itemName\".";
             $conn->commit();
 
         } catch (Exception $e) {
@@ -188,369 +134,330 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['update-stock'])) {
     }
 }
 
-// =====================================================================
-// FETCH DROPDOWN ITEMS
-// =====================================================================
 $items = [];
 try {
-    $query = $conn->prepare("
-        SELECT id, item_name, barcode, sku_code, unit, selling_price
-        FROM items
-        WHERE status = 'active'
-        ORDER BY item_name
-    ");
+    $query = $conn->prepare("SELECT id, item_name, barcode, sku_code, unit, selling_price FROM items WHERE status = 'active' ORDER BY item_name");
     $query->execute();
     $items = $query->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = "Error fetching items: " . $e->getMessage();
 }
 
-// =====================================================================
-// FETCH STOCK MOVEMENTS — join items + price_cycles for live price
-// =====================================================================
 $movements = [];
 try {
     $stmt = $conn->prepare("
-        SELECT
-            sm.id,
-            sm.barcode,
-            sm.quantity,
-            sm.movement_type,
-            sm.is_ironed,
-            sm.is_steamed,
-            sm.is_hanged,
-            sm.created_at,
-
-            -- Always pull item_name fresh from items table
-            COALESCE(i.item_name, sm.item_name)  AS item_name,
-
-            -- Effective price: active cycle > stored price > items.selling_price
-            CASE
-                WHEN pc.id IS NOT NULL
-                     AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days
-                THEN GREATEST(0,
-                        pc.base_price
-                        - (DATEDIFF(CURDATE(), pc.cycle_start) * pc.daily_reduction)
-                     )
-                ELSE COALESCE(sm.price, i.selling_price, 0)
-            END AS effective_price,
-
-            CASE
-                WHEN pc.id IS NOT NULL
-                     AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days
-                THEN 1
-                ELSE 0
-            END AS is_cycle_price,
-
-            GREATEST(0, pc.cycle_days - DATEDIFF(CURDATE(), pc.cycle_start))
-                AS cycle_days_remaining
-
+        SELECT sm.id, sm.barcode, sm.quantity, sm.movement_type,
+               sm.is_ironed, sm.is_steamed, sm.is_hanged, sm.created_at,
+               COALESCE(i.item_name, sm.item_name) AS item_name,
+               CASE
+                   WHEN pc.id IS NOT NULL AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days
+                   THEN GREATEST(0, pc.base_price - (DATEDIFF(CURDATE(), pc.cycle_start) * pc.daily_reduction))
+                   ELSE COALESCE(sm.price, i.selling_price, 0)
+               END AS effective_price,
+               CASE WHEN pc.id IS NOT NULL AND DATEDIFF(CURDATE(), pc.cycle_start) < pc.cycle_days THEN 1 ELSE 0 END AS is_cycle_price,
+               GREATEST(0, pc.cycle_days - DATEDIFF(CURDATE(), pc.cycle_start)) AS cycle_days_remaining
         FROM stock_movements sm
-
-        -- Join items by barcode to get the authoritative item name + price
-        LEFT JOIN items i
-               ON i.barcode = sm.barcode
-              AND i.status   = 'active'
-
-        -- Join active price cycle for this item (if any)
-        LEFT JOIN price_cycles pc
-               ON pc.item_id  = i.id
-              AND pc.is_active = 1
-
+        LEFT JOIN items i ON i.barcode = sm.barcode AND i.status = 'active'
+        LEFT JOIN price_cycles pc ON pc.item_id = i.id AND pc.is_active = 1
         ORDER BY sm.created_at DESC
-        LIMIT 100
+        LIMIT 200
     ");
     $stmt->execute();
     $movements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     $error = "Error fetching movements: " . $e->getMessage();
 }
+
+$totalValue  = array_sum(array_map(fn($m) => $m['quantity'] * $m['effective_price'], $movements));
+$totalItems  = count($movements);
+$lowStockCount = 0;
+try {
+    $ls = $conn->prepare("
+        SELECT COUNT(*) as c FROM items i
+        LEFT JOIN stock_movements sm ON sm.barcode = i.barcode
+        WHERE COALESCE(sm.quantity, 0) <= i.min_stock AND i.status = 'active' AND i.min_stock > 0
+    ");
+    $ls->execute();
+    $lowStockCount = (int)($ls->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
+} catch (PDOException $e) {}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Movement</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f0f2f5;
-            color: #333;
-            min-height: 100vh;
-            padding: 30px 20px;
-        }
-
-        h2 { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
-        h2::before { content: "📦"; }
-        h3 { font-size: 1.1rem; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-        h3::before { content: "📋"; }
-
-        .card {
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.07);
-            padding: 28px 32px;
-            max-width: 680px;
-            margin-bottom: 32px;
-        }
-
-        .alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; font-weight: 500; }
-        .alert-error   { background: #fef2f2; border-left: 4px solid #ef4444; color: #b91c1c; }
-        .alert-success { background: #f0fdf4; border-left: 4px solid #22c55e; color: #15803d; }
-
-        .form-group { margin-bottom: 18px; }
-
-        label { display: block; font-size: 0.85rem; font-weight: 600; color: #555; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
-
-        select, input[type="number"] {
-            width: 100%; padding: 10px 14px; border: 1.5px solid #dde1e9; border-radius: 8px;
-            font-size: 0.95rem; color: #333; background: #fafafa; transition: border-color 0.2s; appearance: none;
-        }
-        select:focus, input[type="number"]:focus { outline: none; border-color: #6366f1; background: #fff; }
-
-        .item-meta { margin-top: 8px; padding: 8px 12px; background: #f5f6ff; border-radius: 6px; font-size: 0.82rem; color: #555; display: none; }
-        .item-meta span { margin-right: 14px; }
-        .item-meta strong { color: #6366f1; }
-
-        .checkboxes { display: flex; gap: 20px; flex-wrap: wrap; }
-        .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 500; color: #444; cursor: pointer; text-transform: none; letter-spacing: 0; }
-        .checkbox-label input[type="checkbox"] { width: 17px; height: 17px; accent-color: #6366f1; cursor: pointer; }
-
-        .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 28px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; }
-        .btn-primary { background: #6366f1; color: #fff; }
-        .btn-primary:hover { background: #4f46e5; transform: translateY(-1px); }
-
-        .table-wrapper { max-width: 1200px; overflow-x: auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); padding: 28px 32px; }
-
-        table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-        thead th { background: #f5f6ff; color: #6366f1; font-weight: 700; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px 14px; text-align: left; white-space: nowrap; }
-        tbody tr { border-bottom: 1px solid #f0f0f5; transition: background 0.15s; }
-        tbody tr:hover { background: #fafbff; }
-        tbody td { padding: 11px 14px; vertical-align: middle; }
-
-        .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-        .badge-in  { background: #dcfce7; color: #15803d; }
-        .badge-out { background: #fee2e2; color: #b91c1c; }
-        .badge-adj { background: #fef9c3; color: #92400e; }
-
-        .price-cycle { color: #7c3aed; font-weight: 700; }
-        .cycle-tag {
-            display: inline-block; margin-left: 6px; padding: 1px 7px;
-            background: #ede9fe; color: #7c3aed; border-radius: 20px;
-            font-size: 0.7rem; font-weight: 700; vertical-align: middle;
-        }
-
-        .check-icon { color: #22c55e; font-size: 1rem; }
-        .cross-icon { color: #d1d5db; font-size: 1rem; }
-        .barcode-text { font-family: monospace; font-size: 0.82rem; color: #777; }
-        .empty-state { text-align: center; padding: 40px 0; color: #aaa; font-size: 0.9rem; }
-
-        .btn-edit { padding: 4px 12px; font-size: 0.78rem; border: none; border-radius: 6px; cursor: pointer; background: #e0e7ff; color: #4338ca; font-weight: 600; transition: background 0.15s; }
-        .btn-edit:hover { background: #c7d2fe; }
-        .btn-delete { padding: 4px 12px; font-size: 0.78rem; border: none; border-radius: 6px; cursor: pointer; background: #fee2e2; color: #b91c1c; font-weight: 600; transition: background 0.15s; margin-left: 6px; }
-        .btn-delete:hover { background: #fecaca; }
-
-        .inline-edit-input { width: 70px; padding: 4px 8px; border: 1.5px solid #6366f1; border-radius: 6px; font-size: 0.85rem; text-align: center; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Warehouse Stock - Think Twice</title>
+  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <style>
+    .cycle-tag {
+      display: inline-block; padding: 2px 7px; margin-left: 6px;
+      background: rgba(167,139,250,0.15); color: #a78bfa;
+      border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .check-icon { color: var(--success); }
+    .cross-icon { color: var(--border-light); }
+    .inline-input { width: 70px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--primary); border-radius: 6px; color: var(--text); font-size: 13px; text-align: center; }
+    .inline-select { padding: 5px 8px; background: var(--bg); border: 1px solid var(--primary); border-radius: 6px; color: var(--text); font-size: 13px; }
+    .item-meta { margin-top: 8px; padding: 10px 14px; background: rgba(0,229,160,0.05); border: 1px solid rgba(0,229,160,0.2); border-radius: 8px; font-size: 12px; color: var(--text-muted); display: none; }
+    .item-meta strong { color: var(--primary); }
+  </style>
 </head>
-<body>
+<body class="page-container">
 
-<h2>Warehouse Stock Management</h2>
+  <?php include __DIR__ . '/../navbar.php'; ?>
 
-<div class="card">
-    <?php if ($error): ?><div class="alert alert-error">⚠️ <?= htmlspecialchars($error) ?></div><?php endif; ?>
-    <?php if ($success): ?><div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div><?php endif; ?>
+  <div class="page-header">
+    <h1 class="page-title">Warehouse Stock Management</h1>
+    <p class="page-subtitle">Track stock movements, adjust quantities, and monitor inventory levels</p>
+  </div>
 
-    <form method="POST">
+  <div class="page-content">
 
-        <div class="form-group">
-            <label for="itemSelectedId">Item</label>
+    <?php if ($error): ?>
+      <div class="alert alert-danger">⚠ <?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
+    <?php if ($success): ?>
+      <div class="alert alert-success">✓ <?= htmlspecialchars($success) ?></div>
+    <?php endif; ?>
+
+    <!-- STATS -->
+    <div class="grid grid-4 mb-lg">
+      <div class="stat-box">
+        <div class="stat-value"><?= $totalItems ?></div>
+        <div class="stat-label">Stock Lines</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">KES <?= number_format($totalValue, 0) ?></div>
+        <div class="stat-label">Total Stock Value</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" style="color: var(--danger)"><?= $lowStockCount ?></div>
+        <div class="stat-label">Low Stock Alerts</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value"><?= count($items) ?></div>
+        <div class="stat-label">Active Items</div>
+      </div>
+    </div>
+
+    <div class="grid grid-3 gap-lg mb-lg">
+
+      <!-- UPDATE STOCK FORM -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Update Stock</div>
+        </div>
+
+        <form method="POST">
+          <div class="form-group">
+            <label>Item</label>
             <select name="itemSelectedId" id="itemSelectedId" required onchange="showItemMeta(this)">
-                <option value="">— Select an item —</option>
-                <?php foreach ($items as $item): ?>
-                    <option
-                        value="<?= $item['id'] ?>"
-                        data-barcode="<?= htmlspecialchars($item['barcode']      ?? '—') ?>"
-                        data-sku="<?= htmlspecialchars($item['sku_code']         ?? '—') ?>"
-                        data-unit="<?= htmlspecialchars($item['unit']            ?? '—') ?>"
-                        data-price="<?= number_format((float)$item['selling_price'], 2) ?>"
-                        <?= (isset($_POST['itemSelectedId']) && $_POST['itemSelectedId'] == $item['id']) ? 'selected' : '' ?>
-                    >
-                        <?= htmlspecialchars($item['item_name']) ?>
-                    </option>
-                <?php endforeach; ?>
+              <option value="">— Select an item —</option>
+              <?php foreach ($items as $item): ?>
+                <option value="<?= $item['id'] ?>"
+                  data-barcode="<?= htmlspecialchars($item['barcode']      ?? '—') ?>"
+                  data-sku="<?= htmlspecialchars($item['sku_code']         ?? '—') ?>"
+                  data-unit="<?= htmlspecialchars($item['unit']            ?? '—') ?>"
+                  data-price="<?= number_format((float)$item['selling_price'], 2) ?>"
+                  <?= (isset($_POST['itemSelectedId']) && $_POST['itemSelectedId'] == $item['id']) ? 'selected' : '' ?>>
+                  <?= htmlspecialchars($item['item_name']) ?>
+                </option>
+              <?php endforeach; ?>
             </select>
             <div class="item-meta" id="itemMeta">
-                <span>🔖 <strong>Barcode:</strong> <span id="metaBarcode"></span></span>
-                <span>📊 <strong>SKU:</strong> <span id="metaSku"></span></span>
-                <span>📐 <strong>Unit:</strong> <span id="metaUnit"></span></span>
-                <span>💰 <strong>Selling Price:</strong> <span id="metaPrice"></span></span>
+              Barcode: <strong id="metaBarcode"></strong> &nbsp;|&nbsp;
+              SKU: <strong id="metaSku"></strong> &nbsp;|&nbsp;
+              Unit: <strong id="metaUnit"></strong> &nbsp;|&nbsp;
+              Price: <strong id="metaPrice"></strong>
             </div>
-        </div>
+          </div>
 
-        <div class="form-group">
-            <label for="quantity">Quantity</label>
+          <div class="form-group">
+            <label>Quantity</label>
             <input type="number" name="quantity" id="quantity" min="1" placeholder="Enter quantity"
-                value="<?= htmlspecialchars($_POST['quantity'] ?? '') ?>" required>
-        </div>
+                   value="<?= htmlspecialchars($_POST['quantity'] ?? '') ?>" required>
+          </div>
 
-        <div class="form-group">
-            <label for="movementType">Movement Type</label>
-            <select name="movementType" id="movementType" required>
-                <option value="">— Select type —</option>
-                <option value="IN"         <?= (($_POST['movementType'] ?? '') === 'IN')         ? 'selected' : '' ?>>Stock In</option>
-                <option value="OUT"        <?= (($_POST['movementType'] ?? '') === 'OUT')        ? 'selected' : '' ?>>Stock Out</option>
-                <option value="ADJUSTMENT" <?= (($_POST['movementType'] ?? '') === 'ADJUSTMENT') ? 'selected' : '' ?>>Adjustment</option>
+          <div class="form-group">
+            <label>Movement Type</label>
+            <select name="movementType" required>
+              <option value="">— Select type —</option>
+              <option value="IN"         <?= (($_POST['movementType'] ?? '') === 'IN')         ? 'selected' : '' ?>>Stock In</option>
+              <option value="OUT"        <?= (($_POST['movementType'] ?? '') === 'OUT')        ? 'selected' : '' ?>>Stock Out</option>
+              <option value="ADJUSTMENT" <?= (($_POST['movementType'] ?? '') === 'ADJUSTMENT') ? 'selected' : '' ?>>Adjustment</option>
             </select>
-        </div>
+          </div>
 
-        <div class="form-group">
-            <label>Attributes</label>
-            <div class="checkboxes">
-                <label class="checkbox-label">
-                    <input type="checkbox" name="isIroned"  value="1" <?= isset($_POST['isIroned'])  ? 'checked' : '' ?>> 🧺 Ironed
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" name="isSteamed" value="1" <?= isset($_POST['isSteamed']) ? 'checked' : '' ?>> 💨 Steamed
-                </label>
-                <label class="checkbox-label">
-                    <input type="checkbox" name="isHanged"  value="1" <?= isset($_POST['isHanged'])  ? 'checked' : '' ?>> 🪝 Hanged
-                </label>
+          <div class="form-group">
+            <label style="text-transform: none; font-size: 14px;">Attributes</label>
+            <div class="flex gap-md" style="flex-wrap: wrap; margin-top: 8px;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; text-transform:none; font-weight:400;">
+                <input type="checkbox" name="isIroned"  value="1" style="width:auto; margin:0;"
+                       <?= isset($_POST['isIroned'])  ? 'checked' : '' ?>> Ironed
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; text-transform:none; font-weight:400;">
+                <input type="checkbox" name="isSteamed" value="1" style="width:auto; margin:0;"
+                       <?= isset($_POST['isSteamed']) ? 'checked' : '' ?>> Steamed
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; text-transform:none; font-weight:400;">
+                <input type="checkbox" name="isHanged"  value="1" style="width:auto; margin:0;"
+                       <?= isset($_POST['isHanged'])  ? 'checked' : '' ?>> Hanged
+              </label>
             </div>
+          </div>
+
+          <button type="submit" name="update-stock" class="btn btn-primary btn-block">Update Stock</button>
+        </form>
+      </div>
+
+      <!-- STOCK TABLE -->
+      <div class="card" style="grid-column: span 2;">
+        <div class="card-header">
+          <div class="card-title">Current Inventory (<?= count($movements) ?> lines)</div>
         </div>
 
-        <button type="submit" name="update-stock" class="btn btn-primary">➕ Update Stock</button>
-    </form>
-</div>
+        <?php if (empty($movements)): ?>
+          <div class="text-center text-muted" style="padding: var(--space-xl);">
+            No stock movements recorded yet. Add stock using the form.
+          </div>
+        <?php else: ?>
+          <div style="overflow-x: auto;">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Price Today</th>
+                  <th>Type</th>
+                  <th>Prep</th>
+                  <th>Last Updated</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($movements as $i => $m): ?>
+                <tr id="row-<?= $m['id'] ?>">
+                  <td class="text-muted text-sm"><?= $i + 1 ?></td>
+                  <td>
+                    <div class="font-semibold"><?= htmlspecialchars($m['item_name']) ?></div>
+                    <div class="font-mono text-sm text-muted"><?= htmlspecialchars($m['barcode'] ?? '—') ?></div>
+                  </td>
 
-<div class="table-wrapper">
-    <h3>Current Inventory / Stock Movements</h3>
+                  <td id="qty-<?= $m['id'] ?>">
+                    <strong class="font-mono"><?= number_format($m['quantity']) ?></strong>
+                  </td>
 
-    <?php if (empty($movements)): ?>
-        <div class="empty-state">No stock movements recorded yet.</div>
-    <?php else: ?>
-    <table>
-        <thead>
-            <tr>
-                <th>#</th>
-                <th>Item</th>
-                <th>Barcode</th>
-                <th>Qty</th>
-                <th>Price Today</th>
-                <th>Type</th>
-                <th>Ironed</th>
-                <th>Steamed</th>
-                <th>Hanged</th>
-                <th>Date &amp; Time</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($movements as $i => $m): ?>
-            <tr id="row-<?= $m['id'] ?>">
-                <td><?= $i + 1 ?></td>
-                <td><strong><?= htmlspecialchars($m['item_name']) ?></strong></td>
-                <td class="barcode-text"><?= htmlspecialchars($m['barcode'] ?? '—') ?></td>
-
-                <td id="qty-<?= $m['id'] ?>">
-                    <strong><?= number_format($m['quantity']) ?></strong>
-                </td>
-
-                <td>
+                  <td>
                     <?php if ($m['is_cycle_price']): ?>
-                        <span class="price-cycle">KES <?= number_format((float)$m['effective_price'], 2) ?></span>
-                        <span class="cycle-tag" title="<?= (int)$m['cycle_days_remaining'] ?> days left in cycle">🔄 Cycle</span>
+                      <span class="text-primary font-mono">KES <?= number_format((float)$m['effective_price'], 2) ?></span>
+                      <span class="cycle-tag" title="<?= (int)$m['cycle_days_remaining'] ?>d left in cycle">Cycle</span>
                     <?php else: ?>
-                        KES <?= number_format((float)$m['effective_price'], 2) ?>
+                      <span class="font-mono">KES <?= number_format((float)$m['effective_price'], 2) ?></span>
                     <?php endif; ?>
-                </td>
+                  </td>
 
-                <td id="type-<?= $m['id'] ?>">
+                  <td id="type-<?= $m['id'] ?>">
                     <?php
-                        $type       = $m['movement_type'];
-                        $badgeClass = match ($type) { 'IN' => 'badge-in', 'OUT' => 'badge-out', default => 'badge-adj' };
+                      $type       = $m['movement_type'];
+                      $badgeClass = match ($type) { 'IN' => 'badge-success', 'OUT' => 'badge-danger', default => 'badge-warn' };
                     ?>
                     <span class="badge <?= $badgeClass ?>"><?= htmlspecialchars($type) ?></span>
-                </td>
+                  </td>
 
-                <td><?= $m['is_ironed']  ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
-                <td><?= $m['is_steamed'] ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
-                <td><?= $m['is_hanged']  ? '<span class="check-icon">✔</span>' : '<span class="cross-icon">—</span>' ?></td>
+                  <td>
+                    <span class="<?= $m['is_ironed']  ? 'check-icon' : 'cross-icon' ?>">
+                      <?= $m['is_ironed'] ? 'I' : '—' ?>
+                    </span>
+                    <span class="<?= $m['is_steamed'] ? 'check-icon' : 'cross-icon' ?>">
+                      <?= $m['is_steamed'] ? 'S' : '—' ?>
+                    </span>
+                    <span class="<?= $m['is_hanged']  ? 'check-icon' : 'cross-icon' ?>">
+                      <?= $m['is_hanged'] ? 'H' : '—' ?>
+                    </span>
+                  </td>
 
-                <td><?= htmlspecialchars(date('d M Y, H:i', strtotime($m['created_at']))) ?></td>
+                  <td class="text-muted text-sm">
+                    <?= htmlspecialchars(date('d M Y, H:i', strtotime($m['created_at']))) ?>
+                  </td>
 
-                <td id="actions-<?= $m['id'] ?>">
-                    <button class="btn-edit"
-                        onclick="startEdit(<?= $m['id'] ?>, <?= (int)$m['quantity'] ?>, '<?= htmlspecialchars($m['movement_type'], ENT_QUOTES) ?>')">
-                        ✏️ Edit
-                    </button>
-                    <button class="btn-delete" onclick="deleteRow(<?= $m['id'] ?>)">🗑️ Delete</button>
-                </td>
-            </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    <?php endif; ?>
-</div>
+                  <td id="actions-<?= $m['id'] ?>">
+                    <div class="flex gap-sm">
+                      <button class="btn btn-secondary btn-sm"
+                              onclick="startEdit(<?= $m['id'] ?>, <?= (int)$m['quantity'] ?>, '<?= htmlspecialchars($m['movement_type'], ENT_QUOTES) ?>')">
+                        Edit
+                      </button>
+                      <button class="btn btn-danger btn-sm" onclick="deleteRow(<?= $m['id'] ?>)">Del</button>
+                    </div>
+                  </td>
+                </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </div>
 
-<script>
+    </div>
+  </div>
+
+  <script>
     function showItemMeta(select) {
-        const opt  = select.options[select.selectedIndex];
-        const meta = document.getElementById('itemMeta');
-        if (!opt.dataset.barcode || opt.dataset.barcode === '—') { meta.style.display = 'none'; return; }
-        document.getElementById('metaBarcode').textContent = opt.dataset.barcode || '—';
-        document.getElementById('metaSku').textContent     = opt.dataset.sku     || '—';
-        document.getElementById('metaUnit').textContent    = opt.dataset.unit    || '—';
-        document.getElementById('metaPrice').textContent   = 'KES ' + (opt.dataset.price || '0.00');
-        meta.style.display = 'block';
+      const opt  = select.options[select.selectedIndex];
+      const meta = document.getElementById('itemMeta');
+      if (!opt.dataset.barcode || opt.dataset.barcode === '—') { meta.style.display = 'none'; return; }
+      document.getElementById('metaBarcode').textContent = opt.dataset.barcode || '—';
+      document.getElementById('metaSku').textContent     = opt.dataset.sku     || '—';
+      document.getElementById('metaUnit').textContent    = opt.dataset.unit    || '—';
+      document.getElementById('metaPrice').textContent   = 'KES ' + (opt.dataset.price || '0.00');
+      meta.style.display = 'block';
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        const sel = document.getElementById('itemSelectedId');
-        if (sel && sel.value) showItemMeta(sel);
+      const sel = document.getElementById('itemSelectedId');
+      if (sel && sel.value) showItemMeta(sel);
     });
 
     function startEdit(id, currentQty, currentType) {
-        document.getElementById(`qty-${id}`).innerHTML =
-            `<input class="inline-edit-input" id="edit-qty-${id}" type="number" min="0" value="${currentQty}">`;
-        document.getElementById(`type-${id}`).innerHTML = `
-            <select id="edit-type-${id}" style="padding:4px 8px;border-radius:6px;border:1.5px solid #6366f1;font-size:0.85rem;">
-                <option value="IN"  ${currentType === 'IN'  ? 'selected' : ''}>IN</option>
-                <option value="OUT" ${currentType === 'OUT' ? 'selected' : ''}>OUT</option>
-            </select>`;
-        document.getElementById(`actions-${id}`).innerHTML = `
-            <button class="btn-edit" onclick="saveEdit(${id})">💾 Save</button>
-            <button class="btn-delete" onclick="location.reload()">✖ Cancel</button>`;
+      document.getElementById(`qty-${id}`).innerHTML =
+        `<input class="inline-input" id="edit-qty-${id}" type="number" min="0" value="${currentQty}">`;
+      document.getElementById(`type-${id}`).innerHTML = `
+        <select id="edit-type-${id}" class="inline-select">
+          <option value="IN"  ${currentType === 'IN'  ? 'selected' : ''}>IN</option>
+          <option value="OUT" ${currentType === 'OUT' ? 'selected' : ''}>OUT</option>
+        </select>`;
+      document.getElementById(`actions-${id}`).innerHTML = `
+        <div class="flex gap-sm">
+          <button class="btn btn-primary btn-sm" onclick="saveEdit(${id})">Save</button>
+          <button class="btn btn-secondary btn-sm" onclick="location.reload()">Cancel</button>
+        </div>`;
     }
 
     function saveEdit(id) {
-        const qty  = document.getElementById(`edit-qty-${id}`).value;
-        const type = document.getElementById(`edit-type-${id}`).value;
-        fetch('', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `inline-edit=1&row_id=${id}&quantity=${encodeURIComponent(qty)}&movementType=${encodeURIComponent(type)}`
-        })
-        .then(r => r.json())
-        .then(data => { if (data.success) location.reload(); else alert('Error: ' + data.message); })
-        .catch(() => alert('Network error. Please try again.'));
+      const qty  = document.getElementById(`edit-qty-${id}`).value;
+      const type = document.getElementById(`edit-type-${id}`).value;
+      fetch('', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    `inline-edit=1&row_id=${id}&quantity=${encodeURIComponent(qty)}&movementType=${encodeURIComponent(type)}`
+      })
+      .then(r => r.json())
+      .then(data => { if (data.success) location.reload(); else alert('Error: ' + data.message); })
+      .catch(() => alert('Network error. Please try again.'));
     }
 
     function deleteRow(id) {
-        if (!confirm('Delete this stock record?')) return;
-        fetch('', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `inline-delete=1&row_id=${id}`
-        })
-        .then(r => r.json())
-        .then(data => { if (data.success) document.getElementById(`row-${id}`).remove(); else alert('Error: ' + data.message); })
-        .catch(() => alert('Network error. Please try again.'));
+      if (!confirm('Delete this stock record?')) return;
+      fetch('', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    `inline-delete=1&row_id=${id}`
+      })
+      .then(r => r.json())
+      .then(data => { if (data.success) document.getElementById(`row-${id}`).remove(); else alert('Error: ' + data.message); })
+      .catch(() => alert('Network error. Please try again.'));
     }
-</script>
+  </script>
 
 </body>
 </html>

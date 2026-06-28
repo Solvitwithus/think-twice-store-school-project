@@ -511,7 +511,9 @@ textarea {
 .text-muted { color: var(--text-muted); }
 .text-primary { color: var(--primary); }
 .text-danger { color: var(--danger); }
+.text-warn { color: var(--warn); }
 .text-success { color: var(--success); }
+.text-right { text-align: right; }
 
 .font-mono { font-family: var(--font-mono); }
 .font-bold { font-weight: 700; }

@@ -1,21 +1,18 @@
 <?php
+session_start();
 require __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/authGuard.php';
+requireLogin();
 
 $error   = "";
 $success = "";
 
-// ── UPDATE SELLING PRICE ─────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_price'])) {
     try {
         $item_id       = (int)   $_POST['item_id'];
         $selling_price = (float) $_POST['selling_price'];
-
         $stmt = $conn->prepare("UPDATE items SET selling_price = :selling_price WHERE id = :id");
-        $stmt->execute([
-            'selling_price' => $selling_price,
-            'id'            => $item_id
-        ]);
-
+        $stmt->execute(['selling_price' => $selling_price, 'id' => $item_id]);
         header("Location: " . $_SERVER['PHP_SELF'] . "?success=1");
         exit;
     } catch (PDOException $e) {
@@ -23,10 +20,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_price'])) {
     }
 }
 
-// ── FEEDBACK ─────────────────────────────────────────────
 if (isset($_GET['success'])) $success = "Price updated successfully!";
 
-// ── FETCH ITEMS ───────────────────────────────────────────
 $items = [];
 try {
     $stmt = $conn->prepare("SELECT id, item_name, buying_price, selling_price FROM items ORDER BY item_name");
@@ -35,117 +30,118 @@ try {
 } catch (PDOException $e) {
     $error = "Error fetching items: " . $e->getMessage();
 }
-?>
 
+// Summary stats
+$totalItems = count($items);
+$belowCost = array_filter($items, fn($i) => $i['selling_price'] < $i['buying_price']);
+$avgMargin = $totalItems > 0
+    ? array_sum(array_map(fn($i) => $i['selling_price'] - $i['buying_price'], $items)) / $totalItems
+    : 0;
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/think-twice/styles.css">
-    <title>Price Setting</title>
-    <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
-        th { background: #4CAF50; color: white; }
-        tr:nth-child(even) { background: #f9f9f9; }
-
-        .price-input {
-            width: 120px;
-            padding: 6px;
-            font-size: 14px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-        .btn-save {
-            padding: 6px 12px;
-            background: black;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .btn-save:hover { background: #333; }
-
-        /* Warn if selling price is below buying price */
-        .margin-warn { color: #e53935; font-size: 12px; }
-        .margin-ok   { color: #4CAF50; font-size: 12px; }
-
-        .msg-success { color: green; }
-        .msg-error   { color: red; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Price Setting - Think Twice</title>
+  <link rel="stylesheet" href="/think-twice/public/theme.css">
 </head>
-<body>
-<?php include __DIR__ . '/../navbar.php'; ?>
+<body class="page-container">
 
-<h2>Price Setting</h2>
+  <?php include __DIR__ . '/../navbar.php'; ?>
 
-<?php if ($success): ?><p class="msg-success"><?= htmlspecialchars($success) ?></p><?php endif; ?>
-<?php if ($error):   ?><p class="msg-error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
+  <div class="page-header">
+    <h1 class="page-title">Price Setting</h1>
+    <p class="page-subtitle">Manage buying and selling prices for all inventory items</p>
+  </div>
 
-<?php if (empty($items)): ?>
-    <p style="color:#999;">No items found. Create items first.</p>
-<?php else: ?>
-<table>
-    <thead>
-        <tr>
-            <th>Item Name</th>
-            <th>Buying Price (KSh)</th>
-            <th>Current Selling Price (KSh)</th>
-            <th>New Selling Price (KSh)</th>
-            <th>Margin</th>
-            <th>Action</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php foreach ($items as $item): ?>
-        <?php
-            // Calculate current margin for display
-            $margin = $item['selling_price'] - $item['buying_price'];
-            $margin_pct = $item['buying_price'] > 0
-                ? round(($margin / $item['buying_price']) * 100, 1)
-                : 0;
-        ?>
-        <tr>
-            <td><?= htmlspecialchars($item['item_name']) ?></td>
-            <td>KSh <?= number_format($item['buying_price'], 2) ?></td>
-            <td>KSh <?= number_format($item['selling_price'], 2) ?></td>
-            <td>
-                <!--
-                    Each row is its own small form.
-                    The hidden field carries the item ID.
-                    The input carries the new price.
-                -->
-                <form method="POST" style="display:inline;">
+  <div class="page-content">
+
+    <?php if ($error): ?>
+      <div class="alert alert-danger">⚠ <?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
+    <?php if ($success): ?>
+      <div class="alert alert-success">✓ <?= htmlspecialchars($success) ?></div>
+    <?php endif; ?>
+
+    <!-- STATS -->
+    <div class="grid grid-3 mb-lg">
+      <div class="stat-box">
+        <div class="stat-value"><?= $totalItems ?></div>
+        <div class="stat-label">Total Items</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" style="color: var(--danger)"><?= count($belowCost) ?></div>
+        <div class="stat-label">Selling Below Cost</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">KES <?= number_format($avgMargin, 0) ?></div>
+        <div class="stat-label">Avg Margin / Item</div>
+      </div>
+    </div>
+
+    <!-- PRICE TABLE -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Item Prices</div>
+        <div class="card-subtitle">Click Save on any row to update the selling price</div>
+      </div>
+
+      <?php if (empty($items)): ?>
+        <div class="text-center text-muted" style="padding: var(--space-xl);">
+          No items found. Create items first.
+        </div>
+      <?php else: ?>
+        <div style="overflow-x: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Item Name</th>
+                <th>Buying Price</th>
+                <th>Current Selling Price</th>
+                <th>New Selling Price</th>
+                <th>Margin</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($items as $item):
+                $margin     = $item['selling_price'] - $item['buying_price'];
+                $margin_pct = $item['buying_price'] > 0
+                    ? round(($margin / $item['buying_price']) * 100, 1)
+                    : 0;
+              ?>
+              <tr>
+                <td class="font-semibold"><?= htmlspecialchars($item['item_name']) ?></td>
+                <td class="font-mono">KES <?= number_format($item['buying_price'], 2) ?></td>
+                <td class="font-mono text-primary">KES <?= number_format($item['selling_price'], 2) ?></td>
+                <td>
+                  <form method="POST" style="display:flex; gap: 8px; align-items: center;">
                     <input type="hidden" name="item_id" value="<?= (int) $item['id'] ?>">
-                    <input
-                        class="price-input"
-                        type="number"
-                        name="selling_price"
-                        step="0.01"
-                        min="0"
-                        value="<?= htmlspecialchars($item['selling_price']) ?>"
-                        required
-                    >
-            </td>
-            <td>
+                    <input type="number" name="selling_price" step="0.01" min="0"
+                           value="<?= htmlspecialchars($item['selling_price']) ?>"
+                           style="width: 130px;" required>
+                </td>
+                <td>
                     <?php if ($margin < 0): ?>
-                        <span class="margin-warn">▼ KSh <?= number_format(abs($margin), 2) ?> loss</span>
+                      <span class="badge badge-danger">▼ KES <?= number_format(abs($margin), 2) ?> loss</span>
                     <?php else: ?>
-                        <span class="margin-ok">▲ KSh <?= number_format($margin, 2) ?> (<?= $margin_pct ?>%)</span>
+                      <span class="badge badge-primary">▲ <?= $margin_pct ?>%</span>
                     <?php endif; ?>
-            </td>
-            <td>
-                    <button class="btn-save" type="submit" name="update_price">Save</button>
-                </form>
-            </td>
-        </tr>
-        <?php endforeach; ?>
-    </tbody>
-</table>
-<?php endif; ?>
+                </td>
+                <td>
+                    <button type="submit" name="update_price" class="btn btn-primary btn-sm">Save</button>
+                  </form>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    </div>
+
+  </div>
 
 </body>
 </html>
