@@ -1,26 +1,26 @@
 /* ═══════════════════════════════════════════════════════════════════════════════
    THINK TWICE - UNIFIED THEME & DESIGN SYSTEM
-   Modern dark theme with green accent for inventory/POS system
+   Light theme with green accent for inventory/POS system
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 :root {
   /* ── COLORS ── */
-  --primary:       #00e5a0;
-  --primary-dark:  #00b86d;
-  --primary-light: #33f0b0;
-  --bg-dark:       #0f1117;
-  --bg:            #161b22;
-  --surface:       #1c2128;
-  --surface-hover: #262c33;
-  --border:        #30363d;
-  --border-light:  #444c56;
-  --text:          #e6edf3;
-  --text-muted:    #8b949e;
-  --danger:        #ff4d6a;
-  --danger-dark:   #c61f2e;
-  --warn:          #ffb830;
-  --success:       #00e5a0;
-  --info:          #5b8ef0;
+  --primary:       #00995e;
+  --primary-dark:  #007a4a;
+  --primary-light: #00c278;
+  --bg-dark:       #e8edf2;
+  --bg:            #f0f4f8;
+  --surface:       #ffffff;
+  --surface-hover: #f5f7fa;
+  --border:        #dde2e8;
+  --border-light:  #eaecef;
+  --text:          #1a2330;
+  --text-muted:    #6b7685;
+  --danger:        #d93025;
+  --danger-dark:   #b01c13;
+  --warn:          #e07b00;
+  --success:       #00995e;
+  --info:          #2563eb;
 
   /* ── TYPOGRAPHY ── */
   --font-sans:     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif;
@@ -41,9 +41,9 @@
   --radius-xl:     12px;
 
   /* ── SHADOWS ── */
-  --shadow-sm:     0 2px 4px rgba(0,0,0,0.1);
-  --shadow-md:     0 4px 12px rgba(0,0,0,0.15);
-  --shadow-lg:     0 12px 32px rgba(0,0,0,0.2);
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:     0 4px 12px rgba(0,0,0,0.10);
+  --shadow-lg:     0 8px 24px rgba(0,0,0,0.12);
 
   /* ── TRANSITIONS ── */
   --trans-fast:    0.1s ease-out;

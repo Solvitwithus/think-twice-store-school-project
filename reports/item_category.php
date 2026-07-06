@@ -1,166 +1,102 @@
 <?php
-// 🔹 Load database connection
+session_start();
 require __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/authGuard.php';
+requireLogin();
 
 try {
-    // 🔹 Prepare SQL query to fetch all item categories
-    $query = $conn->prepare("SELECT * FROM itemCategory");
-
-    // 🔹 Execute query (required for PDO)
-    $query->execute();
-
-    // 🔹 Fetch all results as associative array
-    $categories = $query->fetchAll(PDO::FETCH_ASSOC);
-
+    $stmt = $conn->prepare("SELECT * FROM itemCategory ORDER BY category_name");
+    $stmt->execute();
+    $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    // 🔴 Stop execution if database fails
-    die("Database error: " . $e->getMessage());
+    $categories = [];
+    $error = $e->getMessage();
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Item Categories</title>
-
-    <!-- ================= PRINT STYLES ================= -->
-    <style>
-
-        /* 🔹 Normal screen styles (optional enhancements) */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th, td {
-            padding: 8px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-
-        th {
-            background-color: #f4f4f4;
-        }
-
-        /* ================= PRINT MODE ================= */
-        @media print {
-
-            /* 🔹 Hide everything except table when printing */
-            body * {
-                visibility: hidden;
-            }
-
-            table, table * {
-                visibility: visible;
-            }
-
-            /* 🔹 Position table at top for clean print */
-            table {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                font-size: 12px;
-            }
-
-            /* 🔹 Clean borders for print */
-            th, td {
-                border: 1px solid #000;
-                padding: 6px;
-            }
-
-            /* 🔹 Repeat table header on every printed page */
-            thead {
-                display: table-header-group;
-            }
-
-            /* 🔹 Prevent row splitting across pages */
-            tr {
-                page-break-inside: avoid;
-            }
-
-            /* 🔹 Hide elements not needed in print */
-            .no-print {
-                display: none !important;
-            }
-
-            /* 🔹 Page margin control */
-            @page {
-                margin: 10mm;
-            }
-        }
-
-        /* 🔹 Hide print title on screen */
-        .print-title {
-            display: none;
-        }
-
-        /* 🔹 Show print title only when printing */
-        @media print {
-            .print-title {
-                display: block;
-                text-align: center;
-                font-size: 18px;
-                margin-bottom: 10px;
-            }
-        }
-
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Item Categories Report - Think Twice</title>
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
+  <style>
+    @media print {
+      .navigation-header, .no-print { display: none !important; }
+      body { background: #fff; color: #000; }
+      .card { border: 1px solid #ccc !important; box-shadow: none !important; }
+      .table th, .table td { border: 1px solid #ccc; }
+    }
+  </style>
 </head>
+<body class="page-container">
 
-<body>
+  <div class="no-print">
+    <?php include __DIR__ . '/../navbar.php'; ?>
+  </div>
 
-<!-- ================= NAVBAR (HIDDEN IN PRINT) ================= -->
-<div class="no-print">
-    <?php include __DIR__ . "/../navbar.php"; ?>
-</div>
+  <div class="page-header">
+    <h1 class="page-title">Item Categories</h1>
+    <p class="page-subtitle"><?= count($categories) ?> categories registered</p>
+  </div>
 
-<!-- ================= PRINT TITLE ================= -->
-<h2 class="print-title">Item Categories Report</h2>
+  <div class="page-content">
 
-<!-- ================= PAGE TITLE ================= -->
-<h2 class="no-print">Item Categories</h2>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">All Item Categories</div>
+        <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">Print / Export</button>
+      </div>
 
-<!-- ================= PRINT BUTTON ================= -->
-<div class="no-print" style="margin-bottom: 10px;">
-    <!-- 🔹 Triggers browser print dialog -->
-    <button onclick="window.print()">Print Report</button>
-</div>
+      <?php if (empty($categories)): ?>
+        <div class="text-center text-muted" style="padding: var(--space-xl);">No categories found.</div>
+      <?php else: ?>
+        <div style="overflow-x: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Category Name</th>
+                <th>Unit</th>
+                <th>Type</th>
+                <th>Tax Type</th>
+                <th>Purchase Excl.</th>
+                <th>Sales Excl.</th>
+                <th>Description</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($categories as $i => $cat): ?>
+              <tr>
+                <td class="text-muted font-mono"><?= $i + 1 ?></td>
+                <td class="font-semibold"><?= htmlspecialchars($cat['category_name']) ?></td>
+                <td class="font-mono text-muted"><?= htmlspecialchars($cat['unit'] ?? '—') ?></td>
+                <td><?= htmlspecialchars($cat['category_type'] ?? '—') ?></td>
+                <td><?= htmlspecialchars($cat['tax_type'] ?? '—') ?></td>
+                <td>
+                  <span class="badge <?= $cat['purchase_excluded'] ? 'badge-warn' : 'badge-success' ?>">
+                    <?= $cat['purchase_excluded'] ? 'Yes' : 'No' ?>
+                  </span>
+                </td>
+                <td>
+                  <span class="badge <?= $cat['sales_excluded'] ? 'badge-warn' : 'badge-success' ?>">
+                    <?= $cat['sales_excluded'] ? 'Yes' : 'No' ?>
+                  </span>
+                </td>
+                <td class="text-muted text-sm"><?= htmlspecialchars($cat['description'] ?? '—') ?></td>
+                <td class="text-muted text-sm font-mono">
+                  <?= isset($cat['created_at']) ? date('d M Y', strtotime($cat['created_at'])) : '—' ?>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      <?php endif; ?>
+    </div>
 
-<!-- ================= DATA TABLE ================= -->
-<table>
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>Category Name</th>
-            <th>Unit</th>
-            <th>Type</th>
-            <th>Purchase Excluded</th>
-            <th>Sales Excluded</th>
-            <th>Tax Type</th>
-            <th>Description</th>
-            <th>Created At</th>
-        </tr>
-    </thead>
-
-    <tbody>
-        <?php foreach ($categories as $category): ?>
-            <tr>
-                <td><?= htmlspecialchars($category['id']) ?></td>
-                <td><?= htmlspecialchars($category['category_name']) ?></td>
-                <td><?= htmlspecialchars($category['unit']) ?></td>
-                <td><?= htmlspecialchars($category['category_type']) ?></td>
-                <td><?= htmlspecialchars($category['purchase_excluded']) ?></td>
-                <td><?= htmlspecialchars($category['sales_excluded']) ?></td>
-                <td><?= htmlspecialchars($category['tax_type']) ?></td>
-                <td><?= htmlspecialchars($category['description']) ?></td>
-                <td><?= htmlspecialchars($category['created_at']) ?></td>
-            </tr>
-        <?php endforeach; ?>
-    </tbody>
-</table>
+  </div>
 
 </body>
 </html>

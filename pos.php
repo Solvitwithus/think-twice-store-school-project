@@ -370,17 +370,17 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 <link rel="stylesheet" href="/think-twice/public/pos-styles.css">
 <style>
   :root {
-    --bg:         #393838;
-    --surface:    #181c27;
-    --surface2:   #1f2535;
-    --border:     #2a3145;
-    --accent:     #00e5a0;
-    --accent-dim: #00a370;
-    --danger:     #ff4d6a;
-    --warn:       #ffb830;
-    --mpesa:      #4caf50;
-    --text:       #e8ecf5;
-    --muted:      #6b7594;
+    --bg:         #f0f4f8;
+    --surface:    #ffffff;
+    --surface2:   #f5f7fa;
+    --border:     #dde2e8;
+    --accent:     #00995e;
+    --accent-dim: #007a4a;
+    --danger:     #d93025;
+    --warn:       #e07b00;
+    --mpesa:      #00995e;
+    --text:       #1a2330;
+    --muted:      #6b7685;
     --mono:       'IBM Plex Mono', monospace;
     --sans:       'IBM Plex Sans', sans-serif;
   }
@@ -418,10 +418,10 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
 
   .btn { font-family: var(--sans); font-size: 13px; font-weight: 600; padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; transition: opacity .15s, transform .1s; letter-spacing: .02em; white-space: nowrap; }
   .btn:active { transform: scale(.97); }
-  .btn-primary   { background: var(--accent);  color: #0f1117; }
+  .btn-primary   { background: var(--accent);  color: #fff; }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
   .btn-danger    { background: var(--danger);   color: #fff; }
-  .btn-warn      { background: var(--warn);     color: #0f1117; }
+  .btn-warn      { background: var(--warn);     color: #fff; }
   .btn-ghost     { background: transparent;     color: var(--muted); border: 1px solid var(--border); }
   .btn-mpesa     { background: var(--mpesa);    color: #fff; }
   .btn:hover { opacity: .85; }
@@ -478,15 +478,15 @@ if ($showReceipt) unset($_SESSION['last_receipt']);
   .dot-split  { background: #a78bfa; }
   .dot-orange { background: var(--warn); }
 
-  .action-btn.full-pay { background: var(--accent); color: #0f1117; font-weight: 700; font-size: 14px; margin: 12px; width: calc(100% - 24px); border-radius: 8px; justify-content: center; border: none; padding: 14px; }
+  .action-btn.full-pay { background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; margin: 12px; width: calc(100% - 24px); border-radius: 8px; justify-content: center; border: none; padding: 14px; }
   .action-btn.full-pay:hover { background: var(--accent-dim); }
 
-  .held-count-badge { margin-left: auto; background: var(--warn); color: #0f1117; font-family: var(--mono); font-size: 10px; font-weight: 700; border-radius: 10px; padding: 2px 7px; }
+  .held-count-badge { margin-left: auto; background: var(--warn); color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; border-radius: 10px; padding: 2px 7px; }
 
   /* ── TOAST ── */
   .toast-bar { padding: 10px 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .toast-bar.success { background: rgba(0,229,160,.12); color: var(--accent); border-bottom: 1px solid rgba(0,229,160,.2); }
-  .toast-bar.error   { background: rgba(255,77,106,.12); color: var(--danger); border-bottom: 1px solid rgba(255,77,106,.2); }
+  .toast-bar.success { background: rgba(0,153,94,.08); color: var(--accent); border-bottom: 1px solid rgba(0,153,94,.2); }
+  .toast-bar.error   { background: rgba(217,48,37,.08); color: var(--danger); border-bottom: 1px solid rgba(217,48,37,.2); }
 
   /* ── MODAL BACKDROP ── */
   .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(4px); z-index: 200; align-items: center; justify-content: center; }

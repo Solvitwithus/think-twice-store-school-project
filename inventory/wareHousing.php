@@ -187,7 +187,7 @@ try {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Warehouse Stock - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
   <style>
     .cycle-tag {
       display: inline-block; padding: 2px 7px; margin-left: 6px;
@@ -198,7 +198,7 @@ try {
     .cross-icon { color: var(--border-light); }
     .inline-input { width: 70px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--primary); border-radius: 6px; color: var(--text); font-size: 13px; text-align: center; }
     .inline-select { padding: 5px 8px; background: var(--bg); border: 1px solid var(--primary); border-radius: 6px; color: var(--text); font-size: 13px; }
-    .item-meta { margin-top: 8px; padding: 10px 14px; background: rgba(0,229,160,0.05); border: 1px solid rgba(0,229,160,0.2); border-radius: 8px; font-size: 12px; color: var(--text-muted); display: none; }
+    .item-meta { margin-top: 8px; padding: 10px 14px; background: rgba(0,153,94,0.05); border: 1px solid rgba(0,153,94,0.2); border-radius: 8px; font-size: 12px; color: var(--text-muted); display: none; }
     .item-meta strong { color: var(--primary); }
   </style>
 </head>

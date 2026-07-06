@@ -5,13 +5,13 @@
 
 :root {
   /* ── POS SPECIFIC ── */
-  --pos-bg:         #0f0f0f;
-  --pos-surface:    #1a1a1a;
-  --pos-surface2:   #252525;
-  --pos-border:     #333;
-  --pos-accent:     #00ff00;
-  --pos-muted:      #666;
-  --pos-text:       #eee;
+  --pos-bg:         #f0f4f8;
+  --pos-surface:    #ffffff;
+  --pos-surface2:   #f5f7fa;
+  --pos-border:     #dde2e8;
+  --pos-accent:     #00995e;
+  --pos-muted:      #6b7685;
+  --pos-text:       #1a2330;
   --pos-mono:       'Courier New', monospace;
 }
 
@@ -112,7 +112,7 @@ body {
 
 .search-bar input:focus {
   border-color: var(--pos-accent);
-  box-shadow: 0 0 8px rgba(0, 255, 0, 0.2);
+  box-shadow: 0 0 0 3px rgba(0, 153, 94, 0.15);
 }
 
 .search-bar input::placeholder {
@@ -142,7 +142,7 @@ body {
 
 .btn-primary {
   background: var(--pos-accent);
-  color: #000;
+  color: #fff;
 }
 
 .btn-primary:hover {
@@ -298,8 +298,8 @@ td:last-child {
 }
 
 .remove-btn:hover {
-  color: #ff4444;
-  background: rgba(255, 68, 68, 0.1);
+  color: #d93025;
+  background: rgba(217, 48, 37, 0.1);
 }
 
 .empty-state {
@@ -427,7 +427,7 @@ td:last-child {
 
 .action-btn.full-pay {
   background: var(--pos-accent);
-  color: #000;
+  color: #fff;
   font-weight: 700;
   font-size: 14px;
   margin: 12px;
@@ -468,15 +468,15 @@ td:last-child {
 }
 
 .toast-bar.success {
-  background: rgba(0, 255, 0, 0.12);
+  background: rgba(0, 153, 94, 0.08);
   color: var(--pos-accent);
-  border-bottom: 1px solid rgba(0, 255, 0, 0.2);
+  border-bottom: 1px solid rgba(0, 153, 94, 0.2);
 }
 
 .toast-bar.error {
-  background: rgba(255, 68, 68, 0.12);
-  color: #ff4444;
-  border-bottom: 1px solid rgba(255, 68, 68, 0.2);
+  background: rgba(217, 48, 37, 0.08);
+  color: #d93025;
+  border-bottom: 1px solid rgba(217, 48, 37, 0.2);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -590,7 +590,7 @@ td:last-child {
 
 .val-change {
   font-size: 18px;
-  color: #ffb830;
+  color: #e07b00;
 }
 
 .modal-actions {

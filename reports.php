@@ -88,29 +88,25 @@ try {
         $stmt = $conn->prepare("
             SELECT
                 s.id,
-                s.name,
+                s.company_name AS name,
                 s.phone,
                 s.email,
-                s.address,
-                COUNT(DISTINCT sm.id) as stock_entries,
-                COALESCE(SUM(sm.quantity), 0) as total_units,
-                COALESCE(SUM(sm.quantity * sm.price), 0) as total_value
+                CONCAT_WS(', ', s.city, s.country) AS address,
+                s.status
             FROM suppliers s
-            LEFT JOIN stock_movements sm ON sm.supplier_id = s.id
-            GROUP BY s.id, s.name, s.phone, s.email, s.address
-            ORDER BY total_value DESC
+            ORDER BY s.company_name
         ");
         $stmt->execute();
         $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         if ($data) {
-            $active = count(array_filter($data, fn($r) => $r['stock_entries'] > 0));
-            $totalVal = array_sum(array_column($data, 'total_value'));
+            $active   = count(array_filter($data, fn($r) => ($r['status'] ?? '') === 'active'));
+            $inactive = count($data) - $active;
             $insights = [
-                ['label' => 'Total Suppliers',   'value' => count($data),                           'color' => 'var(--text)'],
-                ['label' => 'Active Suppliers',  'value' => $active,                               'color' => 'var(--success)'],
-                ['label' => 'Total Stock Value', 'value' => 'KES ' . number_format($totalVal, 0),  'color' => 'var(--primary)'],
-                ['label' => 'No Activity',       'value' => (count($data) - $active) . ' suppliers', 'color' => 'var(--text-muted)'],
+                ['label' => 'Total Suppliers',   'value' => count($data),             'color' => 'var(--text)'],
+                ['label' => 'Active Suppliers',  'value' => $active,                  'color' => 'var(--success)'],
+                ['label' => 'Inactive / Other',  'value' => $inactive,               'color' => 'var(--warn)'],
+                ['label' => 'Full Report',       'value' => 'See Suppliers tab →',   'color' => 'var(--text-muted)'],
             ];
         }
     }
@@ -161,7 +157,7 @@ $currentTitle = $reportTitles[$report_type] ?? 'Report';
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= $currentTitle ?> - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
   <style>
     .report-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: var(--space-xl); }
     .report-tab {
@@ -170,7 +166,7 @@ $currentTitle = $reportTitles[$report_type] ?? 'Report';
       background: var(--surface); transition: all 0.15s;
     }
     .report-tab:hover { border-color: var(--primary); color: var(--primary); }
-    .report-tab.active { background: var(--primary); color: #000; border-color: var(--primary); }
+    .report-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
     .insight-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-md); margin-bottom: var(--space-xl); }
     @media (max-width: 768px) { .insight-grid { grid-template-columns: repeat(2, 1fr); } }
@@ -393,42 +389,31 @@ $currentTitle = $reportTitles[$report_type] ?? 'Report';
         </div>
 
       <?php elseif ($report_type === 'suppliers'): ?>
-        <?php
-          $maxVal = max(array_column($data, 'total_value') ?: [1]);
-        ?>
         <div style="overflow-x: auto;">
           <table class="table">
             <thead>
               <tr>
-                <th>Supplier</th>
+                <th>Company Name</th>
                 <th>Phone</th>
                 <th>Email</th>
-                <th class="text-right">Stock Entries</th>
-                <th class="text-right">Units Supplied</th>
-                <th class="text-right">Total Value (KES)</th>
-                <th style="width:140px;">Activity</th>
+                <th>Location</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               <?php foreach ($data as $row):
-                $pct = $maxVal > 0 ? ($row['total_value'] / $maxVal) * 100 : 0;
+                $statusBadge = match($row['status'] ?? '') {
+                  'active'      => 'badge-success',
+                  'blacklisted' => 'badge-danger',
+                  default       => 'badge-warn',
+                };
               ?>
               <tr>
                 <td class="font-semibold"><?= htmlspecialchars($row['name']) ?></td>
                 <td class="font-mono text-muted"><?= htmlspecialchars($row['phone']) ?></td>
                 <td class="text-muted text-sm"><?= htmlspecialchars($row['email'] ?? '—') ?></td>
-                <td class="text-right font-mono"><?= number_format($row['stock_entries']) ?></td>
-                <td class="text-right font-mono"><?= number_format($row['total_units']) ?></td>
-                <td class="text-right font-bold text-primary font-mono">
-                  <?= $row['total_value'] > 0 ? number_format($row['total_value'], 0) : '—' ?>
-                </td>
-                <td>
-                  <?php if ($row['stock_entries'] > 0): ?>
-                    <div class="pct-bar" style="width: <?= min(100, $pct) ?>%"></div>
-                  <?php else: ?>
-                    <span class="text-muted text-sm">No activity</span>
-                  <?php endif; ?>
-                </td>
+                <td class="text-muted text-sm"><?= htmlspecialchars($row['address'] ?? '—') ?></td>
+                <td><span class="badge <?= $statusBadge ?>"><?= ucfirst($row['status'] ?? 'Unknown') ?></span></td>
               </tr>
               <?php endforeach; ?>
             </tbody>

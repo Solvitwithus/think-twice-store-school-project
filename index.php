@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Login - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
   <style>
     body {
       display: flex;
@@ -107,14 +107,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     .auth-container {
       width: 100%;
-      max-width: 400px;
-      padding: 40px;
+      max-width: 520px;
+      padding: 40px 24px;
     }
     .auth-box {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius-xl);
-      padding: var(--space-xl);
+      padding: 48px 52px;
       box-shadow: var(--shadow-lg);
     }
     .auth-header {

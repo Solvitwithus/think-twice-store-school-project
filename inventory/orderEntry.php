@@ -84,7 +84,7 @@ try {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>New Requisition - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
   <style>
     .line-table th, .line-table td { padding: 10px 12px; }
     .line-table thead th { background: var(--bg); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }

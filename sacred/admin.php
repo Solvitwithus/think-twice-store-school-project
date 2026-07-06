@@ -63,14 +63,14 @@ $allPermissions = ['pos', 'inventory', 'suppliers', 'reports', 'roles'];
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Role Management - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
   <style>
     .perm-item { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--surface-hover); padding: 10px; border-radius: 6px; cursor: pointer; margin-bottom: 6px; }
     .perm-item input { width: auto; margin: 0; }
     .role-card { background: var(--surface-hover); border-radius: 8px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--border); }
     .role-name { font-weight: 600; font-size: 14px; text-transform: capitalize; margin-bottom: 6px; }
     .role-perms { display: flex; flex-wrap: wrap; gap: 6px; }
-    .perm-badge { background: rgba(0, 229, 160, 0.15); color: var(--primary); font-size: 11px; padding: 4px 10px; border-radius: 12px; }
+    .perm-badge { background: rgba(0, 153, 94, 0.15); color: var(--primary); font-size: 11px; padding: 4px 10px; border-radius: 12px; }
     .assign-form { display: flex; align-items: center; gap: 8px; }
     select { padding: 8px 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; }
   </style>

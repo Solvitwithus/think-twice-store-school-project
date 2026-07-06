@@ -37,7 +37,7 @@ $totalValue  = array_sum(array_map(fn($i) => $i['current_stock'] * $i['selling_p
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Item Listing - Think Twice</title>
-  <link rel="stylesheet" href="/think-twice/public/theme.css">
+  <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
 </head>
 <body class="page-container">
 
