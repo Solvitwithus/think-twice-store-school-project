@@ -2,83 +2,109 @@
 session_start();
 require __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/authGuard.php';
-
 requireLogin();
 
-$error = '';
+$error   = '';
 $success = '';
 
-// Handle form submissions
+/* ── POST handlers ──────────────────────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  
-  // Add/Update Supplier
-  if (isset($_POST['action']) && $_POST['action'] === 'save') {
-    $id = (int)($_POST['id'] ?? 0);
-    $name = trim($_POST['name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-    $address = trim($_POST['address'] ?? '');
 
-    if (!$name || !$phone) {
-      $error = 'Supplier name and phone are required.';
-    } else {
-      try {
-        if ($id > 0) {
-          // Update
-          $stmt = $conn->prepare("
-            UPDATE suppliers 
-            SET name = ?, email = ?, phone = ?, address = ?
-            WHERE id = ?
-          ");
-          $stmt->execute([$name, $email, $phone, $address, $id]);
-          $success = 'Supplier updated successfully.';
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'save') {
+        $id           = (int)($_POST['id'] ?? 0);
+        $company_name = trim($_POST['company_name'] ?? '');
+        $contact_name = trim($_POST['contact_name'] ?? '');
+        $phone        = trim($_POST['phone']        ?? '');
+        $email        = trim($_POST['email']        ?? '');
+        $city         = trim($_POST['city']         ?? '');
+        $country      = trim($_POST['country']      ?? 'Kenya');
+        $address_line1= trim($_POST['address_line1']?? '');
+        $postal_code  = trim($_POST['postal_code']  ?? '0000');
+        $payment_terms= trim($_POST['payment_terms']?? '');
+        $status       = trim($_POST['status']       ?? 'active');
+        $notes        = trim($_POST['notes']        ?? '');
+
+        if (!$company_name || !$phone) {
+            $error = 'Company name and phone number are required.';
         } else {
-          // Insert
-          $stmt = $conn->prepare("
-            INSERT INTO suppliers (name, email, phone, address)
-            VALUES (?, ?, ?, ?)
-          ");
-          $stmt->execute([$name, $email, $phone, $address]);
-          $success = 'Supplier added successfully.';
+            try {
+                if ($id > 0) {
+                    $stmt = $conn->prepare("
+                        UPDATE suppliers
+                        SET company_name   = ?, contact_name = ?, phone    = ?,
+                            email          = ?, city          = ?, country  = ?,
+                            address_line1  = ?, postal_code   = ?,
+                            payment_terms  = ?, status        = ?, notes   = ?
+                        WHERE id = ?
+                    ");
+                    $stmt->execute([
+                        $company_name, $contact_name, $phone,
+                        $email, $city, $country,
+                        $address_line1, $postal_code,
+                        $payment_terms, $status, $notes,
+                        $id
+                    ]);
+                    $success = 'Supplier updated successfully.';
+                } else {
+                    $stmt = $conn->prepare("
+                        INSERT INTO suppliers
+                            (company_name, contact_name, phone, email,
+                             city, country, address_line1, postal_code,
+                             payment_terms, status, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $company_name, $contact_name, $phone, $email,
+                        $city, $country, $address_line1, $postal_code,
+                        $payment_terms, $status, $notes
+                    ]);
+                    $success = 'Supplier added successfully.';
+                }
+            } catch (PDOException $e) {
+                $error = 'Database error: ' . $e->getMessage();
+            }
         }
-      } catch (PDOException $e) {
-        $error = 'Database error: ' . $e->getMessage();
-      }
     }
-  }
 
-  // Delete Supplier
-  if (isset($_POST['action']) && $_POST['action'] === 'delete') {
-    $id = (int)$_POST['id'];
-    try {
-      $stmt = $conn->prepare("DELETE FROM suppliers WHERE id = ?");
-      $stmt->execute([$id]);
-      $success = 'Supplier deleted.';
-    } catch (PDOException $e) {
-      $error = 'Error deleting supplier: ' . $e->getMessage();
+    if ($action === 'delete') {
+        $id = (int)($_POST['id'] ?? 0);
+        try {
+            $stmt = $conn->prepare("DELETE FROM suppliers WHERE id = ?");
+            $stmt->execute([$id]);
+            $success = 'Supplier deleted.';
+        } catch (PDOException $e) {
+            $error = 'Error deleting supplier: ' . $e->getMessage();
+        }
     }
-  }
 }
 
-// Fetch suppliers
+/* ── Fetch suppliers ─────────────────────────────────────────── */
 try {
-  $stmt = $conn->prepare("SELECT * FROM suppliers ORDER BY name ASC");
-  $stmt->execute();
-  $suppliers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $conn->prepare("SELECT * FROM suppliers ORDER BY company_name ASC");
+    $stmt->execute();
+    $suppliers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-  $error = 'Error fetching suppliers: ' . $e->getMessage();
-  $suppliers = [];
+    $error     = 'Error fetching suppliers: ' . $e->getMessage();
+    $suppliers = [];
 }
 
+/* ── Edit mode ───────────────────────────────────────────────── */
 $editSupplier = null;
 if (isset($_GET['edit'])) {
-  $id = (int)$_GET['edit'];
-  foreach ($suppliers as $s) {
-    if ($s['id'] == $id) {
-      $editSupplier = $s;
-      break;
+    $eid = (int)$_GET['edit'];
+    foreach ($suppliers as $s) {
+        if ($s['id'] === $eid) { $editSupplier = $s; break; }
     }
-  }
+}
+
+function statusBadge(string $status): string {
+    return match($status) {
+        'active'      => 'badge-success',
+        'blacklisted' => 'badge-danger',
+        default       => 'badge-warn',
+    };
 }
 ?>
 <!DOCTYPE html>
@@ -88,14 +114,20 @@ if (isset($_GET['edit'])) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Suppliers - Think Twice</title>
   <link rel="stylesheet" href="/think-twice/public/theme.css?v=2">
+  <style>
+    .supplier-grid { display:grid; grid-template-columns:340px 1fr; gap:var(--space-lg); align-items:start; }
+    @media (max-width:900px) { .supplier-grid { grid-template-columns:1fr; } }
+    .form-row { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); }
+    @media (max-width:600px) { .form-row { grid-template-columns:1fr; } }
+  </style>
 </head>
 <body class="page-container">
-  
+
   <?php include 'navbar.php'; ?>
 
   <div class="page-header">
     <h1 class="page-title">Suppliers Management</h1>
-    <p class="page-subtitle">Manage your supplier information and contacts</p>
+    <p class="page-subtitle"><?= count($suppliers) ?> supplier<?= count($suppliers) !== 1 ? 's' : '' ?> on record</p>
   </div>
 
   <div class="page-content">
@@ -103,126 +135,178 @@ if (isset($_GET['edit'])) {
     <?php if ($error): ?>
       <div class="alert alert-danger">⚠ <?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
-
     <?php if ($success): ?>
       <div class="alert alert-success">✓ <?= htmlspecialchars($success) ?></div>
     <?php endif; ?>
 
-    <div class="grid grid-3 gap-lg mb-lg">
+    <div class="supplier-grid">
 
-      <!-- FORM PANEL -->
-      <div class="card">
+      <!-- ── FORM PANEL ────────────────────────────────────── -->
+      <div class="card" style="position:sticky; top: calc(var(--nav-height, 64px) + 16px);">
         <div class="card-header">
-          <div class="card-title"><?= $editSupplier ? 'Edit Supplier' : 'Add Supplier' ?></div>
+          <div class="card-title"><?= $editSupplier ? 'Edit Supplier' : 'Add New Supplier' ?></div>
         </div>
-        
-        <form method="POST" class="card-body">
+
+        <form method="POST" style="padding: var(--space-lg); display:flex; flex-direction:column; gap:var(--space-md);">
           <input type="hidden" name="action" value="save">
           <input type="hidden" name="id" value="<?= $editSupplier ? $editSupplier['id'] : 0 ?>">
 
           <div class="form-group">
-            <label for="name">Supplier Name *</label>
-            <input 
-              type="text" 
-              id="name" 
-              name="name" 
-              value="<?= htmlspecialchars($editSupplier['name'] ?? '') ?>"
-              placeholder="e.g., ABC Distributors"
-              required
-            >
+            <label>Company Name *</label>
+            <input type="text" name="company_name"
+                   value="<?= htmlspecialchars($editSupplier['company_name'] ?? '') ?>"
+                   placeholder="e.g. Nairobi Bale Traders Ltd" required>
           </div>
 
           <div class="form-group">
-            <label for="email">Email</label>
-            <input 
-              type="email" 
-              id="email" 
-              name="email" 
-              value="<?= htmlspecialchars($editSupplier['email'] ?? '') ?>"
-              placeholder="supplier@example.com"
-            >
+            <label>Contact Person</label>
+            <input type="text" name="contact_name"
+                   value="<?= htmlspecialchars($editSupplier['contact_name'] ?? '') ?>"
+                   placeholder="Full name of primary contact">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Phone *</label>
+              <input type="tel" name="phone"
+                     value="<?= htmlspecialchars($editSupplier['phone'] ?? '') ?>"
+                     placeholder="+254 712 345 678" required>
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email"
+                     value="<?= htmlspecialchars($editSupplier['email'] ?? '') ?>"
+                     placeholder="supplier@example.com">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>City</label>
+              <input type="text" name="city"
+                     value="<?= htmlspecialchars($editSupplier['city'] ?? '') ?>"
+                     placeholder="Nairobi">
+            </div>
+            <div class="form-group">
+              <label>Country</label>
+              <input type="text" name="country"
+                     value="<?= htmlspecialchars($editSupplier['country'] ?? 'Kenya') ?>"
+                     placeholder="Kenya">
+            </div>
           </div>
 
           <div class="form-group">
-            <label for="phone">Phone *</label>
-            <input 
-              type="tel" 
-              id="phone" 
-              name="phone" 
-              value="<?= htmlspecialchars($editSupplier['phone'] ?? '') ?>"
-              placeholder="+254 712 345 678"
-              required
-            >
+            <label>Address</label>
+            <input type="text" name="address_line1"
+                   value="<?= htmlspecialchars($editSupplier['address_line1'] ?? '') ?>"
+                   placeholder="Street / Building / P.O. Box">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Payment Terms</label>
+              <select name="payment_terms">
+                <?php
+                $terms = ['', 'Cash on Delivery', 'Net 7', 'Net 14', 'Net 30', 'Prepaid'];
+                $cur   = $editSupplier['payment_terms'] ?? '';
+                foreach ($terms as $t):
+                ?>
+                <option value="<?= $t ?>" <?= $cur === $t ? 'selected' : '' ?>>
+                  <?= $t ?: 'Select…' ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select name="status">
+                <?php foreach (['active','inactive','blacklisted'] as $st): ?>
+                <option value="<?= $st ?>"
+                  <?= ($editSupplier['status'] ?? 'active') === $st ? 'selected' : '' ?>>
+                  <?= ucfirst($st) ?>
+                </option>
+                <?php endforeach; ?>
+              </select>
+            </div>
           </div>
 
           <div class="form-group">
-            <label for="address">Address</label>
-            <textarea 
-              id="address" 
-              name="address"
-              placeholder="123 Business Street, City"
-              style="min-height: 80px;"
-            ><?= htmlspecialchars($editSupplier['address'] ?? '') ?></textarea>
+            <label>Notes</label>
+            <textarea name="notes" placeholder="Any additional notes about this supplier…"
+                      style="min-height:70px;"><?= htmlspecialchars($editSupplier['notes'] ?? '') ?></textarea>
           </div>
 
-          <div class="flex gap-md">
-            <button type="submit" class="btn btn-primary flex-1"><?= $editSupplier ? 'Update' : 'Add' ?> Supplier</button>
+          <div style="display:flex; gap:var(--space-md);">
+            <button type="submit" class="btn btn-primary" style="flex:1;">
+              <?= $editSupplier ? 'Update Supplier' : 'Add Supplier' ?>
+            </button>
             <?php if ($editSupplier): ?>
-              <a href="/think-twice/suppliers.php" class="btn btn-secondary flex-1" style="text-decoration: none; text-align: center;">Cancel</a>
+              <a href="/think-twice/suppliers.php" class="btn btn-secondary" style="flex:1; text-align:center;">Cancel</a>
             <?php endif; ?>
           </div>
         </form>
       </div>
 
-      <!-- SUPPLIERS LIST -->
-      <div class="card" style="grid-column: span 2;">
+      <!-- ── SUPPLIERS LIST ────────────────────────────────── -->
+      <div class="card">
         <div class="card-header">
-          <div class="card-title">Suppliers (<?= count($suppliers) ?>)</div>
+          <div class="card-title">All Suppliers</div>
+          <a href="/think-twice/reports/suppliers.php" class="btn btn-secondary btn-sm">View Report</a>
         </div>
 
-        <div class="card-body">
-          <?php if (empty($suppliers)): ?>
-            <div class="text-center text-muted">
-              <p>No suppliers yet. Add one to get started.</p>
-            </div>
-          <?php else: ?>
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Email</th>
-                  <th>Address</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach ($suppliers as $supplier): ?>
-                  <tr>
-                    <td class="font-semibold"><?= htmlspecialchars($supplier['name']) ?></td>
-                    <td class="font-mono text-sm"><?= htmlspecialchars($supplier['phone']) ?></td>
-                    <td class="text-muted"><?= htmlspecialchars($supplier['email'] ?? '-') ?></td>
-                    <td class="text-muted text-sm"><?= htmlspecialchars(substr($supplier['address'] ?? '-', 0, 30)) ?></td>
-                    <td>
-                      <div class="flex gap-sm">
-                        <a href="?edit=<?= $supplier['id'] ?>" class="btn btn-secondary btn-sm">Edit</a>
-                        <form method="POST" style="display: inline;" onsubmit="return confirm('Delete this supplier?');">
-                          <input type="hidden" name="action" value="delete">
-                          <input type="hidden" name="id" value="<?= $supplier['id'] ?>">
-                          <button type="submit" class="btn btn-danger btn-sm">Delete</button>
-                        </form>
-                      </div>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-              </tbody>
-            </table>
-          <?php endif; ?>
+        <?php if (empty($suppliers)): ?>
+          <div class="text-center text-muted" style="padding:var(--space-xl);">
+            No suppliers yet. Add one using the form.
+          </div>
+        <?php else: ?>
+        <div style="overflow-x:auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Phone</th>
+                <th>City</th>
+                <th>Terms</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($suppliers as $s): ?>
+              <tr>
+                <td class="font-semibold"><?= htmlspecialchars($s['company_name']) ?></td>
+                <td class="text-muted text-sm"><?= htmlspecialchars($s['contact_name'] ?? '—') ?></td>
+                <td class="font-mono text-sm"><?= htmlspecialchars($s['phone']) ?></td>
+                <td class="text-muted text-sm">
+                  <?= htmlspecialchars(implode(', ', array_filter([$s['city'] ?? null, $s['country'] ?? null]))) ?: '—' ?>
+                </td>
+                <td class="text-sm"><?= htmlspecialchars($s['payment_terms'] ?? '—') ?></td>
+                <td>
+                  <span class="badge <?= statusBadge($s['status'] ?? 'inactive') ?>">
+                    <?= ucfirst($s['status'] ?? 'Unknown') ?>
+                  </span>
+                </td>
+                <td>
+                  <div style="display:flex; gap:var(--space-sm);">
+                    <a href="?edit=<?= $s['id'] ?>" class="btn btn-secondary btn-sm">Edit</a>
+                    <form method="POST" style="display:inline;"
+                          onsubmit="return confirm('Delete <?= htmlspecialchars(addslashes($s['company_name'])) ?>?');">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="id" value="<?= $s['id'] ?>">
+                      <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
         </div>
+        <?php endif; ?>
       </div>
 
     </div>
-
   </div>
 
 </body>

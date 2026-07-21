@@ -16,7 +16,7 @@ try {
 
     $stmt = $conn->prepare("
         SELECT r.id, r.requisition_date, r.due_date, r.status, r.memo, r.created_at,
-               s.name AS supplier_name,
+               s.company_name AS supplier_name,
                COUNT(ri.id) AS item_count,
                COALESCE(SUM(ri.total), 0) AS total_value
         FROM requisitions r

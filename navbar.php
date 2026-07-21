@@ -32,6 +32,12 @@
                 link.classList.add('current');
             }
 
+        // Reports link: active on reports.php AND any /reports/ sub-page
+        } else if (href === '/think-twice/reports.php') {
+            if (path === href || path.startsWith('/think-twice/reports/')) {
+                link.classList.add('current');
+            }
+
         // All other links: exact match only
         } else if (path === href) {
             link.classList.add('current');
