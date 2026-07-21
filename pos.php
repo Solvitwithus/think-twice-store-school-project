@@ -43,6 +43,14 @@ if (isset($_GET['action'])) {
             'TransactionDesc'   => 'POS Sale – Think Twice',
         ];
 
+        if (empty($accessToken)) {
+            echo json_encode([
+                'error' => 'Failed to get M-Pesa access token. Check your credentials.',
+                'resultCode' => 401
+            ]);
+            exit;
+        }
+
         $ch = curl_init('https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest');
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
